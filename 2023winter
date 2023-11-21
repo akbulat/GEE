@@ -1,0 +1,36 @@
+// Загрузка геометрии Алтайского края
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+var altaiRegion = altai.geometry();
+
+// Загрузка коллекции Landsat 9 Collection 2 Tier 1 TOA Reflectance
+var landsat9Collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_TOA')
+  .filterBounds(altaiRegion)
+  .filterDate('2022-12-01', '2023-02-28') // Декабрь 2022 - Февраль 2023
+  .select(['B4', 'B3', 'B2']); // Выберите RGB каналы
+
+// Создание RGB изображения
+var trueColorRGB = landsat9Collection.mean();
+
+// Обрезаем изображение по границам Алтайского края
+var trueColorRGBClipped = trueColorRGB.clip(altaiRegion);
+
+// Визуализация RGB изображения
+var trueColorRGBVis = {
+  min: 0,
+  max: 0.4,
+  bands: ['B4', 'B3', 'B2']
+};
+
+Map.centerObject(altaiRegion, 8);
+Map.addLayer(trueColorRGBClipped, trueColorRGBVis, 'True Color RGB');
+
+// Экспорт RGB изображения на Google Drive
+Export.image.toDrive({
+  image: trueColorRGBClipped,
+  description: 'Landsat9_TrueColorRGB_Dec2022_Feb2023_Altai',
+  folder: 'Your_Folder_Name', // Замените на имя вашей папки в Google Drive
+  fileNamePrefix: 'Landsat9_TrueColorRGB_Dec2022_Feb2023_Altai',
+  scale: 30, // Разрешение в метрах
+  region: altaiRegion,
+  maxPixels: 1e13 
+});

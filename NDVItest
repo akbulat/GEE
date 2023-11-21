@@ -1,0 +1,62 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Загрузка коллекции Landsat
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+var altaiRegion = altai.geometry();
+var collection = ee.ImageCollection('LANDSAT/LE07/C01/T1_TOA')
+  .filterBounds(altaiRegion) // Замените "geometry" на геометрию интересующей вас области
+  .filterDate('2001-05-01', '2005-09-01') // Замените START_DATE и END_DATE на интересующий вас временной диапазон
+    .filter(ee.Filter.or(
+    ee.Filter.date('2001-05-01', '2001-09-30'),
+    ee.Filter.date('2002-05-01', '2002-09-30'),
+    ee.Filter.date('2003-05-01', '2003-09-30'),
+    ee.Filter.date('2004-05-01', '2004-09-30'),
+    ee.Filter.date('2005-05-01', '2005-09-30')
+  ))
+  .select(['B3', 'B4']); // Выберите полосы для расчета NDVI
+// Функция для расчета NDVI
+
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B3', 'B4']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+// Применение функции к коллекции
+var ndviCollection = collection.map(addNDVI);
+
+// График NDVI на временной шкале
+var plotNDVI = ui.Chart.image.seriesByRegion({
+  imageCollection: ndviCollection,
+  regions: altaiRegion,
+  reducer: ee.Reducer.mean(),
+  scale: 30,
+  xProperty: 'system:time_start'
+})
+.setOptions({
+  title: 'Средний NDVI по времени',
+  hAxis: {title: 'Дата'},
+  vAxis: {title: 'NDVI'},
+  lineWidth: 1,
+  pointSize: 3
+});
+
+// Добавление графика на карту
+Map.centerObject(altaiRegion, 10);
+Map.addLayer(altaiRegion);
+print(plotNDVI);
+// ... (ваш предыдущий код)
+
+// Добавление NDVI карты к фрейму карты
+var ndviVis = {min: -1, max: 1, palette: ['green', 'yellow', 'red']}; // Настройка цветовой схемы NDVI от зеленой до красной
+var ndviLayer = ui.Map.Layer(ndviCollection.select('NDVI').mean(), ndviVis, 'NDVI');
+Map.layers().add(ndviLayer);
+
+// Отображение карты
+Map.centerObject(altaiRegion, 10);
+Map.addLayer(altaiRegion);
+Map.addLayer(altai);
+  // Применение маски границ шейп-файла к NDVI коллекции
+var clippedNdviCollection = ndviCollection.map(function(image) {
+  return image.clip(altaiRegion);
+});

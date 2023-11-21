@@ -1,0 +1,32 @@
+
+// Загрузка геометрии Алтайского края
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+
+var rasterPaths = [
+
+  "projects/ee-akfazlief/assets/cropland_1984_1990_ra",
+  "projects/ee-akfazlief/assets/cropland_1991_1995_ra",
+  "projects/ee-akfazlief/assets/cropland_1996_1999_ra",
+  "projects/ee-akfazlief/assets/cropland__2000_2003_ra",
+  "projects/ee-akfazlief/assets/cropland__2004_2007_ra",
+  "projects/ee-akfazlief/assets/cropland__2008_2011_ra",
+  "projects/ee-akfazlief/assets/cropland__2012_2015_ra",
+  "projects/ee-akfazlief/assets/cropland__2016_2019_ra",
+  "projects/ee-akfazlief/assets/cropland__2020_ra",
+  "projects/ee-akfazlief/assets/cropland__2021_ra",
+  "projects/ee-akfazlief/assets/cropland__2022_ra"
+];
+
+rasterPaths.forEach(function(path) {
+  var raster = ee.Image(path);
+  var area = raster.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    scale: 30,
+    maxPixels: 1e13
+  });
+  
+  var areaSquareMeters = area.get('b1');
+  var areaHectares = ee.Number(areaSquareMeters).divide(10000);
+  
+  print('Площадь растра в гектарах для:', path, areaHectares);
+});

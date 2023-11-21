@@ -1,0 +1,105 @@
+// Загрузка геометрии FAO GAUL First-Level Administrative Units
+var faoGaul = ee.FeatureCollection("FAO/GAUL/2015/level1");
+
+// Фильтрация республики Алтай по коду ADM1_CODE
+var altaiRegion = faoGaul.filter(ee.Filter.eq('ADM1_CODE', 2489));
+
+
+// Загрузка геометрии Алтайского края
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+var altaiRegion = altai.geometry();
+
+// Загрузка данных о сельскохозяйственных угодьях за разные годы
+var cropland2000_2003 = ee.ImageCollection("users/potapovpeter/Global_cropland_2003");
+var cropland2003_2007 = ee.ImageCollection("users/potapovpeter/Global_cropland_2007");
+var cropland2007_2011 = ee.ImageCollection("users/potapovpeter/Global_cropland_2011");
+var cropland2011_2015 = ee.ImageCollection("users/potapovpeter/Global_cropland_2015");
+var cropland2015_2019 = ee.ImageCollection("users/potapovpeter/Global_cropland_2019");
+
+// Обрезка данных о сельскохозяйственных угодьях по границе Алтайского края
+var clippedCropland2000_2003 = cropland2000_2003.mosaic().clip(altaiRegion);
+var clippedCropland2003_2007 = cropland2003_2007.mosaic().clip(altaiRegion);
+var clippedCropland2007_2011 = cropland2007_2011.mosaic().clip(altaiRegion);
+var clippedCropland2011_2015 = cropland2011_2015.mosaic().clip(altaiRegion);
+var clippedCropland2015_2019 = cropland2015_2019.mosaic().clip(altaiRegion);
+
+// Функция для выявления изменений между двумя слоями
+var detectChanges = function(image1, image2) {
+  var unchanged = image1.and(image2);
+  var croplandLoss = image1.subtract(image2);
+  var croplandGain = image2.subtract(image1);
+  
+  return unchanged.rename("unchanged")
+                 .addBands(croplandLoss.rename("cropland_loss"))
+                 .addBands(croplandGain.rename("cropland_gain"))
+                 .selfMask(); // Применение .selfMask() для убирания no data
+};
+
+// Создание слоев для разных периодов
+var changes2000_2003_2003_2007 = detectChanges(clippedCropland2000_2003, clippedCropland2003_2007);
+var changes2003_2007_2007_2011 = detectChanges(clippedCropland2003_2007, clippedCropland2007_2011);
+var changes2007_2011_2011_2015 = detectChanges(clippedCropland2007_2011, clippedCropland2011_2015);
+var changes2011_2015_2015_2019 = detectChanges(clippedCropland2011_2015, clippedCropland2015_2019);
+
+// Добавление слоев на карту
+var visParams = {
+  min: 0,
+  max: 1,
+  palette: ['white', 'green']
+};
+// Функция для маскирования значения 0 и преобразования в 1
+var maskZero = function(image) {
+  return image.updateMask(image.neq(0)).selfMask();
+};
+var maskedCropland2003 = maskZero(clippedCropland2000_2003);
+
+Map.addLayer(maskedCropland2003, visParams, 'Сельскохозяйственные угодья 2000-2003');
+Map.addLayer(changes2000_2003_2003_2007.select(["cropland_gain"]), {min: 0, max: 1, palette: ['blue']}, 'Cropland gain 2000-2003 vs 2003-2007');
+Map.addLayer(changes2003_2007_2007_2011.select(["cropland_gain"]), {min: 0, max: 1, palette: ['blue']}, 'Cropland gain 2003-2007 vs 2007-2011');
+Map.addLayer(changes2007_2011_2011_2015.select(["cropland_gain"]), {min: 0, max: 1, palette: ['blue']}, 'Cropland gain 2007-2011 vs 2011-2015');
+Map.addLayer(changes2011_2015_2015_2019.select(["cropland_gain"]), {min: 0, max: 1, palette: ['blue']}, 'Cropland gain 2011-2015 vs 2015-2019');
+
+Map.addLayer(changes2000_2003_2003_2007.select(["cropland_loss"]), {min: 0, max: 1, palette: ['red']}, 'Cropland loss 2000-2003 vs 2003-2007');
+Map.addLayer(changes2003_2007_2007_2011.select(["cropland_loss"]), {min: 0, max: 1, palette: ['red']}, 'Cropland loss 2003-2007 vs 2007-2011');
+Map.addLayer(changes2007_2011_2011_2015.select(["cropland_loss"]), {min: 0, max: 1, palette: ['red']}, 'Cropland loss 2007-2011 vs 2011-2015');
+Map.addLayer(changes2011_2015_2015_2019.select(["cropland_loss"]), {min: 0, max: 1, palette: ['red']}, 'Cropland loss 2011-2015 vs 2015-2019');
+
+// Определение параметров экспорта
+var exportParams = {
+  region: altaiRegion,
+  scale: 30,  // Разрешение (метры)
+  crs: 'EPSG:4326',  // Система координат
+  maxPixels: 1e13,   // Максимальное количество пикселей
+  folder: 'cropland_changes',  // Папка на Google Диске
+  format: 'GeoTIFF'
+};
+
+// Функция для экспорта слоев Cropland Gain и Cropland Loss
+var exportCroplandChange = function(changeLayer, description, bandName) {
+  Export.image.toDrive({
+    image: changeLayer.select([bandName]),
+    description: description,
+    fileNamePrefix: description,
+    crs: exportParams.crs,
+    maxPixels: exportParams.maxPixels,
+    region: exportParams.region,
+    scale: exportParams.scale,
+    fileFormat: exportParams.format,
+    formatOptions: exportParams.formatOptions
+  });
+};
+
+// Экспорт Cropland Gain и Cropland Loss для каждого периода
+exportCroplandChange(changes2000_2003_2003_2007, 'cropland_gain_2000_2003_Altai_Republic', 'cropland_gain');
+exportCroplandChange(changes2000_2003_2003_2007, 'cropland_loss_2000_2003_Altai_Republic', 'cropland_loss');
+
+exportCroplandChange(changes2003_2007_2007_2011, 'cropland_gain_2003_2007_Altai_Republic', 'cropland_gain');
+exportCroplandChange(changes2003_2007_2007_2011, 'cropland_loss_2003_2007_Altai_Republic', 'cropland_loss');
+
+exportCroplandChange(changes2007_2011_2011_2015, 'cropland_gain_2007_2011_Altai_Republic', 'cropland_gain');
+exportCroplandChange(changes2007_2011_2011_2015, 'cropland_loss_2007_2011_Altai_Republic', 'cropland_loss');
+
+exportCroplandChange(changes2011_2015_2015_2019, 'cropland_gain_2011_2015_Altai_Republic', 'cropland_gain');
+exportCroplandChange(changes2011_2015_2015_2019, 'cropland_loss_2011_2015_Altai_Republic', 'cropland_loss');
+
+

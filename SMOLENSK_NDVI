@@ -1,0 +1,34 @@
+// Загрузка коллекции региона Смоленск
+var smolensk = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_CODE', 2557));
+var smolenskRegion = smolensk.geometry();
+
+// Функция для расчета NDVI и обрезки по границам региона
+var calculateNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI');  // Индексы полос для Sentinel-2
+  return image.addBands(ndvi).clip(smolenskRegion);
+};
+
+// Фильтрация коллекции Sentinel-2 для каждого месяца
+for (var month = 4; month <= 10; month++) {
+  var startDate = ee.Date.fromYMD(2023, month, 1).advance(-5, 'days');  // 5 дней до начала месяца
+  var endDate = ee.Date.fromYMD(2023, month, 1).advance(1, 'month').advance(5, 'days');  // 5 дней после конца месяца
+  
+  var sentinelCollection = ee.ImageCollection("COPERNICUS/S2")  // Идентификатор коллекции для Sentinel-2
+    .filterBounds(smolenskRegion)
+    .filterDate(startDate, endDate)
+    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 15))  // Фильтр по облачности менее 15%
+    .map(calculateNDVI);
+  
+  var monthlyNDVI = sentinelCollection.median();
+  
+  var monthName = ee.Date.fromYMD(2023, month, 1).format('MMMM');  // Используем оригинальные даты для имени месяца
+  print(monthName.getInfo() + ' NDVI', monthlyNDVI);
+  
+  // Визуализация
+  Map.addLayer(monthlyNDVI.select('NDVI'), {
+    min: -1,
+    max: 1,
+    palette: ['blue', 'white', 'green']
+  }, monthName.getInfo() + ' NDVI');
+}

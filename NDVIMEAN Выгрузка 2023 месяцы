@@ -1,0 +1,50 @@
+// Загрузка геометрии Алтайского края
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+var altaiRegion = altai.geometry();
+
+// Загрузка коллекции Landsat
+var collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+  .filterBounds(altaiRegion)
+  .filterDate('2023-05-01', '2023-08-31')
+  .select(['B8', 'B4']); // Выберите полосы для расчета NDVI
+
+// Функция для расчета NDVI
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+// Применение функции к коллекции
+var ndviCollection = collection.map(addNDVI);
+
+// Разделение коллекции по месяцам
+var months = ee.List.sequence(5, 8); // Май, июнь, июль, август
+months.getInfo().forEach(function(month) {
+  var startDate = ee.Date.fromYMD(2023, month, 1);
+  var endDate = startDate.advance(1, 'month').advance(-1, 'day');
+  var monthImages = ndviCollection.filterDate(startDate, endDate);
+
+  if (monthImages.size().getInfo() > 0) {
+    var meanNdviImage = monthImages.select('NDVI').mean();
+    
+    // Обрезка по границам Алтайского края
+    var clippedNdviImage = meanNdviImage.clip(altaiRegion);
+    
+    Map.addLayer(clippedNdviImage, {min: -1, max: 1, palette: ['red', 'yellow', 'green']}, 'Средний NDVI ' + month);
+    
+    // Экспорт изображения на Google Drive
+    var exportParams = {
+      image: clippedNdviImage.toFloat(),
+      description: 'NDVI_Mean_' + month,
+      scale: 30, // Укажите необходимый масштаб
+      region: altaiRegion,
+      maxPixels: 1e13 // Укажите максимальное количество пикселей
+    };
+    
+    // Начнем экспорт
+    Export.image.toDrive(exportParams);
+  }
+});
+
+// Центрирование карты на границе республики Алтай
+Map.centerObject(altaiRegion, 8);

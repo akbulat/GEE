@@ -1,0 +1,7 @@
+var title = ui.Panel([
+  ui.Label({
+    value: 'Cropland Dynamics'
+  })
+  ]);
+title.style().set('position', 'top-center');
+Map.add(title);

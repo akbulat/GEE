@@ -1,0 +1,156 @@
+var roi1 = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_NAME', 'Tyumenskaya Oblast')); // Выберите геометрию Республики Алтай
+var roi = roi1.geometry();
+var panel = ui.Panel({
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {
+    width: '300px',
+    position: 'top-left'
+  }
+});
+Map.setCenter(68.969, 58.736, 6);
+panel.add(ui.Label('Weather Forecast for Tyumen Region'));
+
+var dateSelector = ui.DateSlider({
+  period: 1,
+  start: '2023-08-01',
+  end: '2023-09-30'
+});
+panel.add(dateSelector);
+
+Map.add(panel);
+
+// Глобальные переменные для хранения текущей легенды и слоя
+var currentLegend = null;
+var currentLayer = null;
+
+function updateLegend(min, max, date) {
+  // Удаляем старую легенду
+  if (currentLegend) {
+    Map.remove(currentLegend);
+  }
+  
+  var legend = ui.Panel({
+    style: {
+      position: 'bottom-left',
+      padding: '8px 15px'
+    }
+  });
+  
+  var legendTitle = ui.Label('Temperature (°C) for ' + date, {
+    fontWeight: 'bold',
+    fontSize: '18px',
+    margin: '0 0 4px 0',
+    padding: '0'
+  });
+  
+  legend.add(legendTitle);
+  
+  var lon = ee.Image.pixelLonLat().select('latitude');
+  var gradient = lon.multiply((max-min)/100.0).add(min);
+  var legendImage = gradient.visualize({min: min, max: max, palette: ['blue', 'purple', 'cyan', 'green', 'yellow', 'red']});
+
+  var panelLegend = ui.Panel({
+    widgets: [ui.Label(min.toFixed(2)+'°C'), ui.Label(max.toFixed(2)+'°C')],
+    style: {
+      stretch: 'horizontal',
+      textAlign: 'center',
+      margin: '0px 8px'
+    }
+  });
+  legend.add(panelLegend);
+  
+  Map.add(legend);
+  currentLegend = legend; // Обновляем глобальную переменную
+}
+
+function generateForecast(date) {
+  var forecast_date = ee.Date(date);
+  
+  var collection = ee.ImageCollection('NOAA/GFS0P25')
+                  .filterDate(forecast_date, forecast_date.advance(1, 'day'));
+  var firstImage = collection.first();
+  
+  var minTemperature = firstImage.reduceRegion({
+    reducer: ee.Reducer.min(),
+    geometry: roi,
+    scale: 1000
+  }).get('temperature_2m_above_ground');
+
+  var maxTemperature = firstImage.reduceRegion({
+    reducer: ee.Reducer.max(),
+    geometry: roi,
+    scale: 1000
+  }).get('temperature_2m_above_ground');
+  
+  var tempViz = {
+    min: minTemperature.getInfo(),
+    max: maxTemperature.getInfo(),
+    palette: ['blue', 'purple', 'cyan', 'green', 'yellow', 'red']
+  };
+
+  updateLegend(tempViz.min, tempViz.max, ee.Date(date).format('YYYY-MM-dd').getInfo());
+  
+  var resampledImage = firstImage.resample('bilinear');
+  var clippedImage = resampledImage.clip(roi);
+  
+  // Удаляем старый слой перед добавлением нового
+  if (currentLayer) {
+    Map.remove(currentLayer);
+  }
+
+  var layerName = 'Temperature for ' + ee.Date(date).format('YYYY-MM-dd').getInfo();
+currentLayer = Map.addLayer(clippedImage.select('temperature_2m_above_ground'), tempViz, layerName);
+}
+
+var generateButton = ui.Button({
+  label: 'Создать прогноз',
+  onClick: function() {
+    var selectedDates = dateSelector.getValue();
+    var selectedDate = selectedDates[0];
+    generateForecast(selectedDate);
+  }
+});
+
+panel.add(generateButton);
+
+function exportData(date) {
+  var forecast_date = ee.Date(date);
+  
+  var collection = ee.ImageCollection('NOAA/GFS0P25')
+                  .filterDate(forecast_date, forecast_date.advance(1, 'day'));
+  
+  var hourlyData = collection.map(function(img) {
+    var meanValues = img.select(['temperature_2m_above_ground', 'relative_humidity_2m_above_ground']).reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: roi,
+      scale: 1000
+    });
+
+    var forecastTime = img.get('forecast_time');
+    
+    return ee.Feature(null, {
+      'forecast_time': forecastTime,
+      'mean_temperature': meanValues.get('temperature_2m_above_ground'),
+      'mean_humidity': meanValues.get('relative_humidity_2m_above_ground')
+    });
+  });
+  
+  Export.table.toDrive({
+    collection: hourlyData,
+    description: 'hourly_mean_temperature_humidity_data_for_' + date,
+    fileFormat: 'CSV'
+  });
+}
+
+var exportButton = ui.Button({
+  label: 'Export Data',
+  onClick: function() {
+    var selectedDates = dateSelector.getValue();
+    var selectedDate = selectedDates[0];
+    exportData(selectedDate);
+  }
+});
+panel.add(exportButton);
+
+

@@ -1,0 +1,52 @@
+// Загрузка коллекции региона Смоленск
+var smolensk = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_CODE', 2557));
+var smolenskRegion = smolensk.geometry();
+
+// Пороговые значения
+var Cutoff_for_vegetation = 0.5;
+var Cutoff_for_Heracleum = 10;
+
+// Функция для вычисления HSI
+var computeHSI = function(image) {
+  var hsi = image.expression(
+    '(NIR / (GREEN - BLUE))', {
+      'NIR': image.select('B5'),
+      'GREEN': image.select('B3'),
+      'BLUE': image.select('B2')
+    }
+  );
+  return hsi.clip(smolenskRegion);
+};
+
+// Функция для вычисления NDVI
+var computeNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B5', 'B4']);
+  return ndvi.clip(smolenskRegion);
+};
+
+// Загрузка и обработка изображений для первого временного диапазона
+var images_May_June = ee.ImageCollection("LANDSAT/LC09/C02/T1_TOA")
+  .filterDate('2023-05-15', '2023-06-15')
+  .filterBounds(smolenskRegion);
+
+var avgHSI_May_June = images_May_June.map(computeHSI).mean();
+var avgNDVI_May_June = images_May_June.map(computeNDVI).mean();
+var difference_May_June = avgHSI_May_June.subtract(avgNDVI_May_June)
+  .updateMask(avgHSI_May_June.gt(Cutoff_for_Heracleum))
+  .updateMask(avgNDVI_May_June.gt(Cutoff_for_vegetation));
+
+// Загрузка и обработка изображений для второго временного диапазона
+var images_August = ee.ImageCollection("LANDSAT/LC09/C02/T1_TOA")
+  .filterDate('2023-08-01', '2023-08-30')
+  .filterBounds(smolenskRegion);
+
+var avgHSI_August = images_August.map(computeHSI).mean();
+var avgNDVI_August = images_August.map(computeNDVI).mean();
+var difference_August = avgHSI_August.subtract(avgNDVI_August)
+  .updateMask(avgHSI_August.gt(Cutoff_for_Heracleum))
+  .updateMask(avgNDVI_August.gt(Cutoff_for_vegetation));
+
+// Отображение результатов
+Map.addLayer(difference_May_June, {min: -10, max: 10, palette: ['blue', 'white', 'green']}, 'Difference May-June');
+Map.addLayer(difference_August, {min: -10, max: 10, palette: ['blue', 'white', 'green']}, 'Difference August');

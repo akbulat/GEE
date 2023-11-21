@@ -1,0 +1,31 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var roi = ee.FeatureCollection("projects/ee-akfazlief/assets/tjumen");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Задаем дату прогноза
+var forecast_date = ee.Date('2023-09-15');
+
+// Загружаем коллекцию изображений
+var collection = ee.ImageCollection('NOAA/GFS0P25')
+                .filterDate(forecast_date, forecast_date.advance(1, 'day'));
+
+// Визуализация для температуры
+var tempViz = {
+  min: 0,
+  max: 20,
+  palette: ['blue', 'purple', 'cyan', 'green', 'yellow', 'red']
+};
+
+// Берем первое изображение из коллекции (предполагая, что оно есть)
+var firstImage = collection.first();
+
+// Ресемплинг изображения для улучшения качества при визуализации
+var resampledImage = firstImage.resample('bilinear');
+
+// Обрезаем по ROI
+var clippedImage = resampledImage.clip(roi);
+
+// Добавляем изображение на карту
+Map.addLayer(clippedImage.select('temperature_2m_above_ground'), tempViz, 'Temperature for 2023-09-12');
+
+// Устанавливаем центр карты
+Map.setCenter(71.72, 52.48, 3.0);

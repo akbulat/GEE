@@ -1,0 +1,63 @@
+// Загрузка геометрии Республики Алтай
+var republicOfAltai = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_NAME', 'Altay Rep.')); // Выберите геометрию Республики Алтай
+var altaiRegion = republicOfAltai.geometry();
+
+// Загрузка коллекции Landsat 5 Collection 1 Tier 1 TOA Reflectance
+var landsat5Collection = ee.ImageCollection('LANDSAT/LT05/C01/T1_TOA')
+  .filterBounds(altaiRegion)
+  .filterDate('1984-01-01', '2000-12-31')
+  .filter(ee.Filter.calendarRange(5, 9, 'month')) // Фильтрация по месяцам май-сентябрь
+  .select(['B4', 'B3']); // Выберите полосы для расчета NDVI
+
+// Функция для расчета NDVI
+var addNDVI_Landsat5 = function(image) {
+  var ndvi = image.normalizedDifference(['B4', 'B3']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+// Применение функции к коллекции Landsat 5
+var ndviCollection_Landsat5 = landsat5Collection.map(addNDVI_Landsat5);
+
+// Функция для визуализации NDVI
+var visualizeNDVI = function(image, visParams, name) {
+  Map.addLayer(image, visParams, name);
+};
+
+// Визуализация NDVI для каждого периода
+var periods = ['1984-1993', '1991-1995', '1996-2000'];
+
+periods.forEach(function(period) {
+  var startDate = ee.Date.fromYMD(parseInt(period.split('-')[0]), 5, 1);
+  var endDate = ee.Date.fromYMD(parseInt(period.split('-')[1]), 9, 30);
+  var ndviImages = ndviCollection_Landsat5.filterDate(startDate, endDate);
+
+  if (ndviImages.size().getInfo() > 0) {
+    var meanNdviImage = ndviImages.select('NDVI').mean();
+    
+    // Обрезаем изображение по границам Республики Алтай
+    var meanNdviImageClipped = meanNdviImage.clip(altaiRegion);
+    
+    var visParams = {
+      min: 0.0,
+      max: 1.0,
+      palette: ['red', 'yellow', 'green']
+    };
+    
+    visualizeNDVI(meanNdviImageClipped, visParams, 'Mean NDVI ' + period);
+        // Экспорт интегрального снимка среднего NDVI в Google Drive
+    Export.image.toDrive({
+      image: meanNdviImageClipped,
+      description: 'Mean_NDVI_' + period,
+      folder: 'NDVI_RA_1984_2000', // Замените на имя вашей папки в Google Drive
+      fileNamePrefix: 'Mean_NDVI_' + period,
+      scale: 30, // Разрешение в метрах
+      region: altaiRegion,
+      maxPixels: 1e10 
+    });
+  }
+});
+
+// Отображение границы Республики Алтай
+Map.centerObject(altaiRegion, 8);
+Map.addLayer(altaiRegion);

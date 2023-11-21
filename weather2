@@ -1,0 +1,37 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var roi = ee.FeatureCollection("projects/ee-akfazlief/assets/tjumen");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Задаем дату прогноза
+var forecast_date = ee.Date('2023-09-12');
+
+
+// Загружаем коллекцию изображений
+var collection = ee.ImageCollection('NOAA/GFS0P25')
+                .filterDate(forecast_date, forecast_date.advance(1, 'day'));
+
+// Функция для экспорта средних данных в таблицу на каждый час
+var exportHourlyMeanData = function() {
+  var hourlyData = collection.map(function(img) {
+    var meanValues = img.select(['temperature_2m_above_ground', 'specific_humidity_2m_above_ground']).reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: roi,
+      scale: 1000
+    });
+
+    var forecastTime = img.get('forecast_time');
+    
+    return ee.Feature(null, {
+      'forecast_time': forecastTime,
+      'mean_temperature': meanValues.get('temperature_2m_above_ground'),
+      'mean_humidity': meanValues.get('specific_humidity_2m_above_ground')
+    });
+  });
+  
+  Export.table.toDrive({
+    collection: hourlyData,
+    description: 'hourly_mean_temperature_humidity_data',
+    fileFormat: 'CSV'
+  });
+};
+
+exportHourlyMeanData();

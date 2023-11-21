@@ -1,0 +1,65 @@
+// Загрузка геометрии Алтайского края
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+var altaiRegion = altai.geometry();
+
+// Загрузка коллекции Landsat
+var collection = ee.ImageCollection('LANDSAT/LE07/C01/T1_TOA')
+  .filterBounds(altaiRegion)
+  .filterDate('2001-05-01', '2005-09-01')
+  .filter(ee.Filter.or(
+    ee.Filter.date('2001-05-01', '2001-09-30'),
+    ee.Filter.date('2002-05-01', '2002-09-30'),
+    ee.Filter.date('2003-05-01', '2003-09-30'),
+    ee.Filter.date('2004-05-01', '2004-09-30'),
+    ee.Filter.date('2005-05-01', '2005-09-30')
+  ))
+  .select(['B3', 'B4']); // Выберите полосы для расчета NDVI
+
+// Функция для расчета NDVI
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B3', 'B4']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+// Применение функции к коллекции
+var ndviCollection = collection.map(addNDVI);
+
+// Применение маски границ шейп-файла к NDVI коллекции
+var clippedNdviCollection = ndviCollection.map(function(image) {
+  return image.clip(altaiRegion);
+});
+
+// Редукция для получения снимка среднего значения NDVI
+var meanNdviImage = clippedNdviCollection.select('NDVI').mean();
+
+// Значения NDVI и соответствующие им цвета (от красного к зеленому)
+var ndviValues = [
+  0, 0.033, 0.066, 0.1, 0.133, 0.166, 0.2, 0.25,
+  0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1
+];
+
+var ndviColors = [
+  'FF0000', 'FF3300', 'FF6600', 'FF9900', 'FFCC00', 'FFFF00', 'CCFF00', '99FF00',
+  '66FF00', '33FF00', '00FF00', '00FF33', '00FF66', '00FF99', '00FFCC', '00FFFF', '00CCFF', '0099FF'
+];
+
+// Создание цветовой палитры на основе значений NDVI и цветов
+var ndviPalette = ndviValues.map(function(value, index) {
+  return ndviColors[index];
+});
+
+// Визуализация NDVI с использованием созданной палитры
+var ndviVis = {
+  min: -1,
+  max: 1,
+  palette: ndviPalette
+};
+
+// Добавление NDVI карты с маской к фрейму карты
+Map.addLayer(meanNdviImage, ndviVis, 'Средний NDVI');
+
+// Отображение карты
+Map.centerObject(altaiRegion, 10);
+Map.addLayer(altaiRegion);
+Map.addLayer(altai);
+

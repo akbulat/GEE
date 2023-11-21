@@ -1,0 +1,58 @@
+// Загрузка геометрии Алтайского края
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+var altaiRegion = altai.geometry();
+
+// Загрузка коллекции Landsat
+var collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_TOA")
+  .filterBounds(altaiRegion)
+  .filterDate('2020-05-01', '2023-09-01')
+  .filter(ee.Filter.or(
+    ee.Filter.date('2020-05-01', '2020-09-30'),
+    ee.Filter.date('2021-05-01', '2021-09-30'),
+    ee.Filter.date('2022-05-01', '2022-09-30'),
+    ee.Filter.date('2023-05-01', '2023-09-30')
+  ))
+  .select(['B3', 'B4']); // Выберите полосы для расчета NDVI
+
+// Функция для расчета NDVI
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B3', 'B4']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+// Применение функции к коллекции
+var ndviCollection = collection.map(addNDVI);
+
+// Применение маски границ шейп-файла к NDVI коллекции
+var clippedNdviCollection = ndviCollection.map(function(image) {
+  return image.clip(altaiRegion);
+});
+
+// Создание интегральных снимков среднего NDVI для каждого года
+var years = ee.List(['2020', '2021', '2022', '2023']);
+years.getInfo().forEach(function(year) {
+  var startDate = ee.Date.fromYMD(parseInt(year), 5, 1);
+  var endDate = ee.Date.fromYMD(parseInt(year), 9, 30);
+  var yearImages = clippedNdviCollection.filterDate(startDate, endDate);
+
+  if (yearImages.size().getInfo() > 0) {
+    var meanNdviImage = yearImages.select('NDVI').mean();
+    Map.addLayer(meanNdviImage, ndviVis, 'Средний NDVI ' + year);
+  }
+});
+
+
+
+// Визуализация NDVI с использованием созданной палитры
+var ndviVis = {
+  min: -1,
+  max: 1,
+};
+
+// Добавление NDVI карты с маской к фрейму карты
+Map.addLayer(meanNdviImage, ndviVis, 'Средний NDVI');
+
+// Отображение карты
+//Map.centerObject(altaiRegion, 10);
+//Map.addLayer(altaiRegion);
+//Map.addLayer(altai);

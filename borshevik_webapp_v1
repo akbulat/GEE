@@ -1,0 +1,159 @@
+// Загрузка коллекции регионов и извлечение списка названий и кодов
+var allRegions = ee.FeatureCollection("FAO/GAUL/2015/level1");
+var region_names = allRegions.aggregate_array('ADM1_NAME').getInfo();
+var region_codes = allRegions.aggregate_array('ADM1_CODE').getInfo();
+
+var smolenskRegion;  // Инициализируем переменную для выбранного региона
+
+// Создание панели управления
+var controlPanel = ui.Panel({
+    layout: ui.Panel.Layout.flow('vertical'),
+    style: {
+        width: '300px',
+        position: 'top-left',
+        padding: '10px'
+    }
+});
+
+// Заголовок панели
+var titleLabel = ui.Label('Анализ данных', {
+    fontWeight: 'bold',
+    fontSize: '20px',
+    margin: '10px 0'
+});
+controlPanel.add(titleLabel);
+
+// Выпадающий список для выбора региона
+var regionSelect = ui.Select({
+    items: region_names,
+    placeholder: 'Выберите регион',
+    onChange: function(regionName) {
+        var index = region_names.indexOf(regionName);
+        var region_code = region_codes[index];
+        var region = ee.FeatureCollection("FAO/GAUL/2015/level1")
+            .filter(ee.Filter.eq('ADM1_CODE', region_code));
+        smolenskRegion = region.geometry();
+
+        // Центрирование карты на выбранном регионе
+        Map.centerObject(smolenskRegion, 7);
+    },
+    style: {
+        stretch: 'horizontal'
+    }
+});
+controlPanel.add(regionSelect);
+
+// Создание панели для ввода пороговых значений
+var thresholdPanel = ui.Panel({
+    layout: ui.Panel.Layout.flow('vertical'),
+    style: {
+        stretch: 'horizontal'
+    }
+});
+controlPanel.add(ui.Label('Пороговые значения:'));
+
+// Значения для вегетации (NDVI)
+var vegRow = ui.Panel({layout: ui.Panel.Layout.flow('horizontal')});
+vegRow.add(ui.Label('Вегетация (NDVI):'));
+var vegetationThresholdInput = ui.Textbox({
+    value: '0.6',
+    style: {
+        stretch: 'horizontal'
+    }
+});
+vegRow.add(vegetationThresholdInput);
+thresholdPanel.add(vegRow);
+
+// Значения для борщевика (HSI)
+var heraRow = ui.Panel({layout: ui.Panel.Layout.flow('horizontal')});
+heraRow.add(ui.Label('Борщевик (HSI):'));
+var heracleumThresholdInput = ui.Textbox({
+    value: '20',
+    style: {
+        stretch: 'horizontal'
+    }
+});
+heraRow.add(heracleumThresholdInput);
+thresholdPanel.add(heraRow);
+
+// Значения для облачности
+var cloudRow = ui.Panel({layout: ui.Panel.Layout.flow('horizontal')});
+cloudRow.add(ui.Label('Облачность (%):'));
+var cloudThresholdInput = ui.Textbox({
+    value: '10',
+    style: {
+        stretch: 'horizontal'
+    }
+});
+cloudRow.add(cloudThresholdInput);
+thresholdPanel.add(cloudRow);
+
+controlPanel.add(thresholdPanel);
+
+// Слайдер даты
+var dateSelector = ui.DateSlider({
+    period: 1,
+    start: '2023-05-01',
+    end: '2023-09-30',
+    style: {
+        stretch: 'horizontal'
+    }
+});
+controlPanel.add(dateSelector);
+
+// Функции для вычисления HSI и NDVI
+var computeHSI = function(image) {
+  var hsi = image.expression(
+    '(NIR / (GREEN - BLUE))', {
+      'NIR': image.select('B8'),
+      'GREEN': image.select('B3'),
+      'BLUE': image.select('B2')
+    }
+  );
+  return hsi.clip(smolenskRegion);
+};
+
+var computeNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']);
+  return ndvi.clip(smolenskRegion);
+};
+
+// Кнопка для генерации слоев
+var generateButton = ui.Button({
+    label: 'Сгенерировать слои',
+    onClick: function() {
+        var selectedDates = dateSelector.getValue();
+        var selectedDate = selectedDates[0];  // Возьмем первую дату из массива
+        var startDate = ee.Date(selectedDate).advance(-1, 'month');
+        var endDate = ee.Date(selectedDate);
+
+        // Получение пороговых значений из полей ввода
+        var Cutoff_for_vegetation = parseFloat(vegetationThresholdInput.getValue());
+        var Cutoff_for_Heracleum = parseFloat(heracleumThresholdInput.getValue());
+        var Cloud_Percentage_Threshold = parseFloat(cloudThresholdInput.getValue());
+
+        // Загрузка и обработка изображений
+        var images = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+            .filterDate(startDate, endDate)
+            .filterBounds(smolenskRegion);
+
+        var avgHSI = images.map(computeHSI).median();
+        var avgNDVI = images.map(computeNDVI).median();
+        var difference = avgHSI.subtract(avgNDVI)
+            .updateMask(avgHSI.gt(Cutoff_for_Heracleum))
+            .updateMask(avgNDVI.gt(Cutoff_for_vegetation));
+
+        // Отображение результатов на карте
+        Map.addLayer(difference, {min: -10, max: 10, palette: ['blue', 'white', 'green']}, 'Difference');
+        Map.addLayer(images.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', Cloud_Percentage_Threshold)).median().clip(smolenskRegion), {bands: ['B4', 'B3', 'B2'], max: 3000}, 'RGB Image');
+    }
+});
+controlPanel.add(generateButton);
+
+// Добавление панели управления на карту
+Map.add(controlPanel);
+
+// Центрирование карты на Смоленске (по умолчанию)
+var defaultRegion = ee.FeatureCollection("FAO/GAUL/2015/level1")
+    .filter(ee.Filter.eq('ADM1_CODE', 2557));  // Смоленск
+Map.centerObject(defaultRegion, 7);

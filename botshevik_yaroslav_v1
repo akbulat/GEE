@@ -1,0 +1,129 @@
+// Загрузка коллекции региона Смоленск
+var smolensk = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_CODE', 2576));
+var smolenskRegion = smolensk.geometry();
+
+// Пороговые значения
+var Cutoff_for_vegetation = 0.45;
+var Cutoff_for_Heracleum = 25;
+var Cloud_Percentage_Threshold = 20;  // Порог облачности в процентах
+
+// Функция для вычисления HSI
+var computeHSI = function(image) {
+  var hsi = image.expression(
+    '(NIR / (GREEN - BLUE))', {
+      'NIR': image.select('B8'),
+      'GREEN': image.select('B3'),
+      'BLUE': image.select('B2')
+    }
+  );
+  return hsi.clip(smolenskRegion);
+};
+
+// Функция для вычисления NDVI
+var computeNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']);
+  return ndvi.clip(smolenskRegion);
+};
+
+// Загрузка и обработка изображений для первого временного диапазона
+var images_May_June = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+  .filterDate('2022-05-15', '2022-06-15')
+  .filterBounds(smolenskRegion);
+
+var avgHSI_May_June = images_May_June.map(computeHSI).median();
+var avgNDVI_May_June = images_May_June.map(computeNDVI).median();
+var difference_May_June = avgHSI_May_June.subtract(avgNDVI_May_June)
+  .updateMask(avgHSI_May_June.gt(Cutoff_for_Heracleum))
+  .updateMask(avgNDVI_May_June.gt(Cutoff_for_vegetation));
+
+// Загрузка и обработка изображений для второго временного диапазона
+var images_August = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+  .filterDate('2022-08-01', '2022-08-30')
+  .filterBounds(smolenskRegion);
+
+var avgHSI_August = images_August.map(computeHSI).median();
+var avgNDVI_August = images_August.map(computeNDVI).median();
+var difference_August = avgHSI_August.subtract(avgNDVI_August)
+  .updateMask(avgHSI_August.gt(Cutoff_for_Heracleum))
+  .updateMask(avgNDVI_August.gt(Cutoff_for_vegetation));
+
+// Отображение результатов
+Map.addLayer(difference_May_June, {min: -10, max: 10, palette: ['blue', 'white', 'green']}, 'Difference May-June');
+Map.addLayer(difference_August, {min: -10, max: 10, palette: ['blue', 'white', 'green']}, 'Difference August');
+Map.addLayer(images_May_June.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', Cloud_Percentage_Threshold)).median().clip(smolenskRegion), {bands: ['B4', 'B3', 'B2'], max: 3000}, 'RGB May-June');
+Map.addLayer(images_August.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', Cloud_Percentage_Threshold)).median().clip(smolenskRegion), {bands: ['B4', 'B3', 'B2'], max: 3000}, 'RGB August');
+
+// Фильтрация снимков по облачности
+var filtered_May_June = images_May_June.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', Cloud_Percentage_Threshold));
+var filtered_August = images_August.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', Cloud_Percentage_Threshold));
+
+// Создание мозаики для периода мая-июня с учетом фильтрации по облакам
+var mosaic_May_June = filtered_May_June.mosaic().clip(smolenskRegion);
+Map.addLayer(mosaic_May_June.visualize({bands: ['B4', 'B3', 'B2'], max: 3000}), {}, 'Mosaic May-June');
+
+// Создание мозаики для периода августа с учетом фильтрации по облакам
+var mosaic_August = filtered_August.mosaic().clip(smolenskRegion);
+Map.addLayer(mosaic_August.visualize({bands: ['B4', 'B3', 'B2'], max: 3000}), {}, 'Mosaic August');
+
+// Экспорт RGB-снимка для периода мая-июня
+Export.image.toDrive({
+  image: mosaic_May_June.visualize({bands: ['B4', 'B3', 'B2'], max: 3000}),
+  description: 'Mosaic_RGB_May_June',
+  scale: 10,
+  region: smolenskRegion,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 5e9  // увеличиваем количество пикселей для экспорта
+});
+
+// Экспорт RGB-снимка для периода августа
+Export.image.toDrive({
+  image: mosaic_August.visualize({bands: ['B4', 'B3', 'B2'], max: 3000}),
+  description: 'Mosaic_RGB_August',
+  scale: 10,
+  region: smolenskRegion,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 5e9  // увеличиваем количество пикселей для экспорта
+});
+
+// Экспорт интегрального (медианного) RGB-снимка для периода мая-июня
+var median_May_June = filtered_May_June.median().clip(smolenskRegion);
+Export.image.toDrive({
+  image: median_May_June.visualize({bands: ['B4', 'B3', 'B2'], max: 3000}),
+  description: 'Median_RGB_May_June',
+  scale: 10,
+  region: smolenskRegion,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 5e9
+});
+
+// Экспорт интегрального (медианного) RGB-снимка для периода августа
+var median_August = filtered_August.median().clip(smolenskRegion);
+Export.image.toDrive({
+  image: median_August.visualize({bands: ['B4', 'B3', 'B2'], max: 3000}),
+  description: 'Median_RGB_August',
+  scale: 10,
+  region: smolenskRegion,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 5e9
+});
+
+// Экспорт слоя difference_May_June
+Export.image.toDrive({
+  image: difference_May_June,
+  description: 'Difference_May_June_2022',
+  scale: 10,
+  region: smolenskRegion,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 5e9  // увеличиваем количество пикселей для экспорта
+});
+
+// Экспорт слоя difference_August
+Export.image.toDrive({
+  image: difference_August,
+  description: 'Difference_August_2022',
+  scale: 10,
+  region: smolenskRegion,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 5e9  // увеличиваем количество пикселей для экспорта
+});

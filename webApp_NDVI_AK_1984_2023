@@ -1,0 +1,108 @@
+// Загрузка геометрии Алтайского края
+var altai = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_CODE', 2490)); // Выберите геометрию Республики Алтай
+var altaiRegion = altai.geometry();
+
+
+// Коллекции изображений Landsat
+var collections = {
+    'Landsat5': {
+        source: 'LANDSAT/LT05/C01/T1_TOA',
+        bands: ['B3', 'B4'],
+        ndvi: ['B4', 'B3']
+    },
+    'Landsat7': {
+        source: 'LANDSAT/LE07/C02/T1_TOA',
+        bands: ['B3', 'B4'],
+        ndvi: ['B4', 'B3']
+    },
+    'Landsat8': {
+        source: 'LANDSAT/LC08/C02/T1_TOA',
+        bands: ['B4', 'B5'],
+        ndvi: ['B5', 'B4']
+    }
+};
+
+// Загрузка коллекций и вычисление NDVI
+var ndviCollection = ee.ImageCollection([]);
+
+for (var key in collections) {
+    var col = ee.ImageCollection(collections[key].source)
+        .filterBounds(altaiRegion)
+        .filter(ee.Filter.calendarRange(5, 9, 'month'))
+        .filterMetadata('CLOUD_COVER', 'less_than', 20)
+        .select(collections[key].bands)
+        .map(function(image) {
+            var ndvi = image.normalizedDifference(collections[key].ndvi).rename('NDVI');
+            return image.addBands(ndvi);
+        });
+    ndviCollection = ndviCollection.merge(col);
+}
+
+// Центрирование карты
+Map.centerObject(altaiRegion, 7);
+
+// Элементы управления
+var years = ['1991-1995', '1996-2000', '2001-2005', '2006-2010', '2011-2016', '2017-2020', '2020', '2021', '2022', '2023'];
+var yearSelect = ui.Select({
+    items: years,
+    placeholder: 'Choose a year',
+    onChange: displayNDVI,
+    style: { width: '200px' }
+});
+
+var panel = ui.Panel([
+    ui.Label('Интегральные слои NDVI по границам Алтайского края', { fontWeight: 'bold', fontSize: '18px' }),
+    ui.Panel([ui.Label('Выберите год для отображения NDVI:'), yearSelect], ui.Panel.Layout.Flow('horizontal')),
+]);
+
+ui.root.add(panel);
+
+// Легенда
+var legend = ui.Panel({ style: { position: 'bottom-right', padding: '8px 15px' } });
+var colors = ['FF0000', 'FF6600', 'FFCC00', 'FFFF00', '00FF00', '004000'];
+var values = ['-1.0', '-0.6', '-0.2', '0.2', '0.6', '1.0'];
+legend.add(ui.Label('Легенда'));
+colors.forEach(function(color, index) {
+    var legendItem = ui.Panel([
+        ui.Label({ style: { backgroundColor: '#' + color, padding: '10px', border: '1px solid black' } }),
+        ui.Label(values[index])
+    ], ui.Panel.Layout.Flow('horizontal'));
+    legend.add(legendItem);
+});
+panel.add(legend);
+
+var ndviLayers = {};
+
+// Функция для отображения NDVI
+function displayNDVI(yearRange) {
+    var layerName = 'NDVI ' + yearRange;
+    
+    // Удаляем старый слой
+    if (ndviLayers[layerName]) {
+        Map.layers().remove(ndviLayers[layerName]);
+    }
+    
+    var startYear, endYear;
+    if (yearRange.length === 4) {
+        startYear = endYear = parseInt(yearRange);
+    } else {
+        var parts = yearRange.split('-');
+        startYear = parseInt(parts[0]);
+        endYear = parseInt(parts[1]);
+    }
+
+    var startDate = ee.Date.fromYMD(startYear, 5, 1);
+    var endDate = ee.Date.fromYMD(endYear, 9, 30);
+    var yearImages = ndviCollection.filterDate(startDate, endDate);
+
+    if (yearImages.size().getInfo() > 0) {
+        var meanNdviImage = yearImages.select('NDVI').mean().clip(altaiRegion);
+        var ndviLayer = ui.Map.Layer(meanNdviImage, { min: -1, max: 1, palette: colors }, layerName);
+        
+        Map.layers().add(ndviLayer);
+        ndviLayers[layerName] = ndviLayer;
+    } else {
+        print('No images available for ' + yearRange);
+    }
+}

@@ -1,0 +1,34 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var bounds = ee.FeatureCollection("projects/ee-akfazlief/assets/border_hsi_test");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Use an appropriate image or image collection. 
+// For demonstration, I'll use a Sentinel-2 image.
+// Функция для вычисления HSI
+var computeHSI = function(image) {
+  var hsi = image.expression(
+    '(NIR / (GREEN - BLUE))', {
+      'NIR': image.select('B8'),
+      'GREEN': image.select('B3'),
+      'BLUE': image.select('B2')
+    }
+  );
+  return hsi.clip(bounds);
+};
+
+// Отображение HSI
+var images_May_June = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+  .filterDate('2023-08-15', '2023-08-25')
+  .filterBounds(bounds);
+
+var avgHSI_May_June = images_May_June.map(computeHSI).median();
+
+Map.addLayer(avgHSI_May_June, {min: -10, max: 10, palette: ['blue', 'white', 'green']}, 'HSI May-June');
+// Экспорт HSI растра в Google Drive
+Export.image.toDrive({
+  image: avgHSI_May_June,
+  description: 'HSI_May_June',
+  scale: 10,
+  region: bounds,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 1e9
+});

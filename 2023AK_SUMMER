@@ -1,0 +1,33 @@
+// Загрузка границ Алтайского края
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+var altaiRegion = altai.geometry();
+
+// Загрузка коллекции Sentinel-2
+var sentinel2 = ee.ImageCollection("COPERNICUS/S2")
+  .filterDate('2023-06-01', '2023-08-31')  // Летние месяцы 2023 года
+  .filterBounds(altaiRegion)  // Фильтрация по Алтайскому краю
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10));  // Отфильтровываем снимки с облачностью больше 10%
+
+// Создаем среднее значение для каждого пикселя на основе всех доступных снимков
+var summerMedian = sentinel2.median().clip(altaiRegion).unmask(0);  // Обрезаем изображение по границам Алтайского края и заменяем значения no data на 0
+
+// Визуализация интегрального RGB снимка
+var visParams = {
+  bands: ['B4', 'B3', 'B2'],  // RGB bands
+  min: 0,
+  max: 3000,
+  gamma: 1.4
+};
+
+Map.addLayer(summerMedian, visParams, 'Summer Median RGB 2023');
+Map.centerObject(altaiRegion, 6);  // Центрирование карты на Алтайском крае
+
+// Экспорт изображения
+Export.image.toDrive({
+  image: summerMedian.visualize(visParams),
+  description: 'Sentinel2_Summer_Median_RGB_2023',
+  folder: 'GEE_Exports',
+  scale: 10,  // Разрешение в метрах на пиксель (для Sentinel-2)
+  region: altaiRegion,
+  maxPixels: 1e13
+});

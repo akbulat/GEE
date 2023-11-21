@@ -1,0 +1,99 @@
+// Определение словаря и функции переопределения
+var dict = {
+  "names": ["Vegetation"],
+  "colors": ["#358221"]
+};
+
+function remapper(image){
+    var remapped = image.remap([2],[1]).rename('Vegetation');
+    return remapped.selfMask();
+}
+
+// Загрузка данных
+var altai = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_NAME', 'Altay Rep.')); // Выберите геометрию Республики Алтай
+var altaiRegion = altai.geometry();
+var esri_lulc10 = ee.ImageCollection("projects/sat-io/open-datasets/landcover/ESRI_Global-LULC_10m_TS");
+
+// Добавление функции для отображения легенды
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 15px'
+  }
+});
+
+function addCategoricalLegend(panel, dict, title) {
+  var legendTitle = ui.Label({
+    value: title,
+    style: {
+      fontWeight: 'bold',
+      fontSize: '18px',
+      margin: '0 0 4px 0',
+      padding: '0'
+    }
+  });
+  panel.add(legendTitle);
+  
+  var loading = ui.Label('Loading legend...', {margin: '2px 0 4px 0'});
+  panel.add(loading);
+  
+  var makeRow = function(color, name) {
+    var colorBox = ui.Label({
+      style: {
+        backgroundColor: color,
+        padding: '8px',
+        margin: '0 0 4px 0'
+      }
+    });
+  
+    var description = ui.Label({
+      value: name,
+      style: {margin: '0 0 4px 6px'}
+    });
+  
+    return ui.Panel({
+      widgets: [colorBox, description],
+      layout: ui.Panel.Layout.Flow('horizontal')
+    });
+  };
+  
+  var palette = dict['colors'];
+  var names = dict['names'];
+  loading.style().set('shown', false);
+  
+  for (var i = 0; i < names.length; i++) {
+    panel.add(makeRow(palette[i], names[i]));
+  }
+  
+  Map.add(panel);
+}
+
+// Добавление слоев на карту
+var years = ['2020', '2021', '2022'];
+years.forEach(function(year) {
+    var image = esri_lulc10
+        .filterBounds(altaiRegion)
+        .filterDate(year + '-01-01', year + '-12-31')
+        .map(remapper)
+        .mosaic();
+    
+    var clippedImage = image.clip(altaiRegion);
+    Map.addLayer(clippedImage, {min: 0, max: 1, palette: dict['colors']}, year + ' Vegetation');
+        // Экспорт изображения в Google Drive
+    Export.image.toDrive({
+        image: clippedImage,
+        description: year + '_Vegetation_Altai',
+        folder: 'Your_Folder_Name', // Укажите имя вашей папки на Google Drive, если необходимо
+        fileNamePrefix: year + '_Vegetation_Altai',
+        scale: 10,
+        region: altaiRegion,
+        maxPixels: 1e13
+    });
+});
+
+// Добавление границ Алтайского края
+Map.addLayer(altai, {}, "Altai Boundary");
+
+// Добавление легенды на карту
+addCategoricalLegend(legend, dict, 'Vegetation in Altai');

@@ -1,0 +1,55 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var border = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Устанавливаем границы и даты
+var startDate = '2022-01-01';
+var endDate = '2022-12-01';
+
+// Фильтр для Dynamic World и Sentinel-2
+var dwCol = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+  .filterBounds(border)
+  .filterDate(startDate, endDate);
+
+var s2Col = ee.ImageCollection('COPERNICUS/S2')
+  .filterBounds(border)
+  .filterDate(startDate, endDate);
+
+// Join соответствующих DW и S2 изображений (по system:index).
+var DwS2Col = ee.Join.saveFirst('s2_img').apply(dwCol, s2Col,
+    ee.Filter.equals({leftField: 'system:index', rightField: 'system:index'}));
+
+// Извлекаем пример изображения DW и соответствующее S2 изображение.
+var dwImage = ee.Image(DwS2Col.first());
+var s2Image = ee.Image(dwImage.get('s2_img'));
+
+// Определение классов и цветов.
+var CLASS_NAMES = [
+    'water', 'trees', 'grass', 'flooded_vegetation', 'crops',
+    'shrub_and_scrub', 'built', 'bare', 'snow_and_ice'];
+
+var VIS_PALETTE = [
+    '419bdf', '397d49', '88b053', '7a87c6', 'e49635', 'dfc35a', 'c4281b',
+    'a59b8f', 'b39fe1'];
+
+// Создание RGB изображения класса (самый вероятный класс) в диапазоне [0, 1].
+var dwRgb = dwImage
+    .select('label')
+    .visualize({min: 0, max: 8, palette: VIS_PALETTE})
+    .divide(255);
+
+// Получаем вероятность самого вероятного класса.
+var top1Prob = dwImage.select(CLASS_NAMES).reduce(ee.Reducer.max());
+
+// Создаем тень от вероятности самого вероятного класса в диапазоне [0, 1].
+var top1ProbHillshade =
+    ee.Terrain.hillshade(top1Prob.multiply(100))
+    .divide(255);
+
+// Комбинируем RGB изображение с тенью.
+var dwRgbHillshade = dwRgb.multiply(top1ProbHillshade);
+
+// Устанавливаем центр карты и добавляем слои.
+Map.addLayer(
+    s2Image, {min: 0, max: 3000, bands: ['B4', 'B3', 'B2']}, 'Sentinel-2 L1C');
+Map.addLayer(
+    dwRgbHillshade, {min: 0, max: 0.65}, 'Dynamic World V1 - label hillshade');

@@ -1,0 +1,103 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var esri_lulc10 = ee.ImageCollection("projects/sat-io/open-datasets/landcover/ESRI_Global-LULC_10m_TS"),
+    table = ee.FeatureCollection("projects/ee-akfazlief/assets/NDWI_ALTAYSKIY_KRAY");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Загрузка геометрии FAO GAUL First-Level Administrative Units
+var faoGaul = ee.FeatureCollection("FAO/GAUL/2015/level1");
+
+// Загрузка коллекции Land Cover
+var esri_lulc10 = ee.ImageCollection("projects/sat-io/open-datasets/landcover/ESRI_Global-LULC_10m_TS");
+
+// Функция для переопределения классов и маскирования
+function remapper(image){
+  var remapped = image.remap([1, 2, 4, 5, 7, 8, 9, 10, 11], [0, 0, 0, 1, 0, 0, 0, 0, 0]).rename('LandCover');
+  return remapped.selfMask(); // Применение маски для значений 0
+}
+
+// Создание палитры и легенды
+var dict = {
+  "names": ["Crops"],
+  "colors": ["#FFDB5C"]
+};
+
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 15px'
+  }
+});
+
+function addCategoricalLegend(panel, dict, title) {
+  var legendTitle = ui.Label({
+    value: title,
+    style: {
+      fontWeight: 'bold',
+      fontSize: '18px',
+      margin: '0 0 4px 0',
+      padding: '0'
+    }
+  });
+  panel.add(legendTitle);
+  
+  var loading = ui.Label('Loading legend...', {margin: '2px 0 4px 0'});
+  panel.add(loading);
+  
+  var makeRow = function(color, name) {
+    var colorBox = ui.Label({
+      style: {
+        backgroundColor: color,
+        padding: '8px',
+        margin: '0 0 4px 0'
+      }
+    });
+  
+    var description = ui.Label({
+      value: name,
+      style: {margin: '0 0 4px 6px'}
+    });
+  
+    return ui.Panel({
+      widgets: [colorBox, description],
+      layout: ui.Panel.Layout.Flow('horizontal')
+    });
+  };
+  
+  var palette = dict['colors'];
+  var names = dict['names'];
+  loading.style().set('shown', false);
+  
+  for (var i = 0; i < names.length; i++) {
+    panel.add(makeRow(palette[i], names[i]));
+  }
+  
+  Map.add(panel);
+}
+
+// Добавление легенды
+addCategoricalLegend(legend, dict, 'Land Cover: Crops');
+
+// Отображение карты для каждого года
+var years = ['2020', '2021', '2022'];
+years.forEach(function(year) {
+  var image = esri_lulc10
+    .filterBounds(faoGaul.filter(ee.Filter.eq('ADM1_CODE', 2489))) // Здесь выбираем по админ коду
+    .filterDate(year + '-01-01', year + '-12-31')
+    .map(remapper)
+    .mosaic();
+  
+  var clippedImage = image.clip(faoGaul.filter(ee.Filter.eq('ADM1_CODE', 2489)).geometry()); // Здесь также выбираем по админ коду
+  
+  Map.addLayer(clippedImage, {min: 0, max: 1, palette: ['#000000', '#FFDB5C']}, year + ' Crops');
+  Export.image.toDrive({
+    image: clippedImage,
+    description: year + '_Crops_Altay_Republic',
+    folder: 'Your_Folder_Name', // Замените на имя вашей папки в Google Drive
+    fileNamePrefix: year + '_Crops_Altay_Republic',
+    scale: 10, // Разрешение в метрах
+    region: faoGaul.filter(ee.Filter.eq('ADM1_CODE', 2489)).geometry(),
+    maxPixels: 2614960812
+  });
+});
+
+// Отображение границ административной единицы Республики Алтай
+Map.addLayer(faoGaul.filter(ee.Filter.eq('ADM1_CODE', 2489)), {}, "Altai Republic Boundary");

@@ -1,0 +1,180 @@
+var roi1 = ee.FeatureCollection("FAO/GAUL/2015/level1")
+    .filter(ee.Filter.eq('ADM1_NAME', 'Tyumenskaya Oblast'));
+var roi = roi1.geometry();
+
+var panel = ui.Panel({
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {
+    width: '400px',
+    position: 'top-left',
+    padding: '10px'
+  }
+});
+Map.setCenter(68.969, 58.736, 6);
+
+var titleLabel = ui.Label('Прогноз погоды для Тюменской области', {
+  fontWeight: 'bold',
+  fontSize: '20px',
+  margin: '10px 0'
+});
+panel.add(titleLabel);
+
+var dateSelector = ui.DateSlider({
+  period: 1,
+  start: '2022-08-01',
+  end: '2023-09-17',
+  style: {
+    stretch: 'horizontal'
+  }
+});
+panel.add(dateSelector);
+Map.add(panel);
+
+var currentLegend = null;
+var currentLayer = null;
+
+function determinePrecipProbability(precipValue) {
+    if (precipValue <= 0.5) {
+        return "Низкая";
+    } else if (precipValue <= 2.5) {
+        return "Средняя";
+    } else {
+        return "Высокая";
+    }
+}
+
+function updateLegend(date, min, max, humidity, uWind, vWind, precipProbability) {
+  if (currentLegend) {
+    Map.remove(currentLegend);
+  }
+
+  var legend = ui.Panel({
+    style: {
+      position: 'bottom-left',
+      padding: '8px 15px'
+    }
+  });
+
+  var legendTitle = ui.Label('Данные о погоде на ' + date, {
+    fontWeight: 'bold',
+    fontSize: '18px',
+    margin: '0 0 4px 0',
+    padding: '0'
+  });
+
+  legend.add(legendTitle);
+
+  var windSpeed = ee.Number(uWind).pow(2).add(ee.Number(vWind).pow(2)).sqrt().getInfo();
+  var windDirection = ee.Number(vWind).atan2(uWind).multiply(180/Math.PI).add(180).getInfo();
+
+  var legendInfo = ui.Panel({
+    widgets: [
+      ui.Label('Температура: ' + min.toFixed(2) + '°C - ' + max.toFixed(2) + '°C'),
+      ui.Label('Влажность: ' + humidity.toFixed(2) + '%'),
+      ui.Label('Скорость ветра: ' + windSpeed.toFixed(2) + ' m/s'),
+      ui.Label('Направление ветра: ' + windDirection.toFixed(2) + '°'),
+      ui.Label('Вероятность осадков: ' + precipProbability)
+    ],
+    style: {
+      stretch: 'horizontal',
+      textAlign: 'left',
+      margin: '0px 8px'
+    }
+  });
+
+  legend.add(legendInfo);
+  Map.add(legend);
+  currentLegend = legend;
+}
+
+function generateForecast(date) {
+    var formattedDate = ee.Date(date).format('YYYY-MM-dd').getInfo();
+    var forecast_date = ee.Date(date);
+
+    var collection = ee.ImageCollection('NOAA/GFS0P25')
+        .filterDate(forecast_date, forecast_date.advance(1, 'day'));
+    var firstImage = collection.first();
+
+    var statistics = firstImage.reduceRegion({
+        reducer: ee.Reducer.minMax().combine({
+            reducer2: ee.Reducer.mean(),
+            sharedInputs: true
+        }),
+        geometry: roi,
+        scale: 1000
+    }).getInfo();
+
+    var minTemperature = statistics['temperature_2m_above_ground_min'];
+    var maxTemperature = statistics['temperature_2m_above_ground_max'];
+    var meanHumidity = statistics['relative_humidity_2m_above_ground_mean'];
+    var uWind = statistics['u_component_of_wind_10m_above_ground_mean'];
+    var vWind = statistics['v_component_of_wind_10m_above_ground_mean'];
+    var precipValue = statistics['precipitation_surface_next_hour_accumulation'];
+    var precipProbability = determinePrecipProbability(precipValue);
+
+    updateLegend(formattedDate, minTemperature, maxTemperature, meanHumidity, uWind, vWind, precipProbability);
+
+    var tempViz = {
+        min: minTemperature,
+        max: maxTemperature,
+        palette: ['blue', 'purple', 'cyan', 'green', 'yellow', 'red']
+    };
+
+    if (currentLayer) {
+        Map.remove(currentLayer);
+    }
+
+    var resampledImage = firstImage.resample('bilinear');
+    var clippedImage = resampledImage.clip(roi);
+    currentLayer = Map.addLayer(clippedImage.select('temperature_2m_above_ground'), tempViz, 'Температура');
+}
+
+var generateButton = ui.Button({
+  label: 'Сгенерировать прогноз',
+  onClick: function() {
+    var selectedDates = dateSelector.getValue();
+    var selectedDate = selectedDates[0];
+    generateForecast(selectedDate);
+  }
+});
+
+panel.add(generateButton);
+
+function exportData(date) {
+    var forecast_date = ee.Date(date);
+    var collection = ee.ImageCollection('NOAA/GFS0P25')
+        .filterDate(forecast_date, forecast_date.advance(1, 'day'));
+
+    var hourlyData = collection.map(function(img) {
+        var meanValues = img.select(['temperature_2m_above_ground', 'relative_humidity_2m_above_ground']).reduceRegion({
+            reducer: ee.Reducer.mean(),
+            geometry: roi,
+            scale: 1000
+        });
+
+        var forecastTime = img.get('forecast_time');
+
+        return ee.Feature(null, {
+            'forecast_time': forecastTime,
+            'mean_temperature': meanValues.get('temperature_2m_above_ground'),
+            'mean_humidity': meanValues.get('relative_humidity_2m_above_ground')
+        });
+    });
+
+    Export.table.toDrive({
+        collection: hourlyData,
+        description: 'hourly_mean_temperature_humidity_data_for_' + date,
+        fileFormat: 'CSV'
+    });
+}
+
+var exportButton = ui.Button({
+    label: 'Export Data',
+    onClick: function() {
+        var selectedDates = dateSelector.getValue();
+        var selectedDate = selectedDates[0];
+        exportData(selectedDate);
+    }
+});
+
+panel.add(exportButton);

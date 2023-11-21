@@ -1,0 +1,43 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var roi = ee.FeatureCollection("projects/ee-akfazlief/assets/tjumen");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Загрузка коллекции изображений
+var dataset = ee.ImageCollection('NOAA/GFS0P25')
+                  .filterBounds(roi)
+                  .filterDate('2023-09-09', '2023-09-13');
+
+// Создание функции для обработки каждого изображения в коллекции
+var createTS = function(img) {
+  var date = img.get('system:time_start');
+  var temp = img.reduceRegion(ee.Reducer.mean(), roi).get('temperature_2m_above_ground');
+  var humidity = img.reduceRegion(ee.Reducer.mean(), roi).get('specific_humidity_2m_above_ground');
+  // ... добавьте другие банды, если нужно
+  
+  var ft = ee.Feature(null, {
+    'system:time_start': date, 
+    'date': ee.Date(date).format('Y/M/d'), 
+    'temperature': temp,
+    'humidity': humidity
+    // ... добавьте другие банды, если нужно
+  });
+  return ft;
+};
+
+// Применение функции ко всей коллекции
+var TS = dataset.map(createTS);
+
+// Создание графика временного ряда для температуры
+var graphTemperature = ui.Chart.feature.byFeature(TS, 'system:time_start', 'temperature')
+                                   .setChartType("ColumnChart")
+                                   .setOptions({vAxis: {title: 'Temperature (°C)'},
+                                                hAxis: {title: 'Date'}});
+print(graphTemperature);
+
+// ... Создайте другие графики, если нужно
+
+// Экспорт временного ряда в CSV
+Export.table.toDrive({
+  collection: TS, 
+  description: 'NOAA_GFS0P25_data_2023_09_09_to_2023_09_13',
+  selectors: ['date', 'temperature', 'humidity'] // ... добавьте другие банды, если нужно
+});

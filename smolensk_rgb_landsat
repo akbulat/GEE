@@ -1,0 +1,67 @@
+// Загрузка коллекции региона Смоленск
+var smolensk = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_CODE', 2557));
+var smolenskRegion = smolensk.geometry();
+
+// Установка даты на апрель 2023 года с дополнительными 10 днями до и после
+var startDate = ee.Date.fromYMD(2023, 3, 22);  // 10 дней до 1 апреля
+var endDate = ee.Date.fromYMD(2023, 5, 10);    // 10 дней после 30 апреля
+
+
+// Функция для создания RGB
+var createRGB = function(image) {
+  var rgb = image.select(['B4', 'B3', 'B2']);
+  return rgb;
+};
+
+// Landsat 8
+var landsat8Collection = ee.ImageCollection('LANDSAT/LC08/C02/T1_TOA')
+  .filterBounds(smolenskRegion)
+  .filterDate(startDate, endDate)
+  .filterMetadata('CLOUD_COVER', 'less_than', 15)
+  .map(createRGB);
+
+var monthlyRGB_L8 = landsat8Collection.median().clip(smolenskRegion);
+
+// Визуализация Landsat 8 RGB
+var visParams = {
+  min: 0,
+  max: 0.3,
+  bands: ['B4', 'B3', 'B2']
+};
+
+Map.addLayer(monthlyRGB_L8, visParams, 'April RGB L8');
+
+// Экспорт изображения Landsat 8 RGB на Google Drive
+Export.image.toDrive({
+  image: monthlyRGB_L8,
+  description: 'Landsat8_RGB_April2023_Smolensk',
+  folder: 'Your_Folder_Name',
+  fileNamePrefix: 'Landsat8_RGB_April2023_Smolensk',
+  scale: 30,
+  region: smolenskRegion,
+  maxPixels: 1e13
+});
+
+// Landsat 9
+var landsat9Collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_TOA')
+  .filterBounds(smolenskRegion)
+  .filterDate(startDate, endDate)
+  .filterMetadata('CLOUD_COVER', 'less_than', 16)
+  .map(createRGB);
+
+var monthlyRGB_L9 = landsat9Collection.median().clip(smolenskRegion);
+
+// Визуализация Landsat 9 RGB
+Map.addLayer(monthlyRGB_L9, visParams, 'April RGB L9');
+
+// Экспорт изображения Landsat 9 RGB на Google Drive
+Export.image.toDrive({
+  image: monthlyRGB_L9,
+  description: 'Landsat9_RGB_April2023_Smolensk',
+  folder: 'Your_Folder_Name',
+  fileNamePrefix: 'Landsat9_RGB_April2023_Smolensk',
+  scale: 30,
+  region: smolenskRegion,
+  maxPixels: 1e13
+});

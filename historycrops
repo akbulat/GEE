@@ -1,0 +1,87 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var table = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Загрузка геометрии Алтайского края
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+var altaiRegion = altai.geometry();
+
+// Загрузка снимков Landsat 5 с 1990 по 1999 на территории Алтайского края
+var dataset = ee.ImageCollection('LANDSAT/LT05/C01/T1_TOA')
+  .filterBounds(altaiRegion);
+
+// Функция для маскирования по границе Алтайского края
+var maskAltai = function(image) {
+  return image.updateMask(image.select('B1').clip(altaiRegion));
+};
+
+// Функция для вычисления NDVI и добавления банда
+var calculateNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B4', 'B3']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+// Функция для создания интегрального снимка с суммированием
+var createIntegralImage = function(collection, startDate, endDate, name) {
+  var images = collection.filterDate(startDate, endDate)
+                         .filter(ee.Filter.calendarRange(5, 9, 'month'))
+                         .map(maskAltai)
+                         .map(calculateNDVI)
+                         .map(function(image) {
+                           // Фильтрация по битовой маске BQA для облачности
+                           var cloudBitMask = 1 << 4; // Бит облачности (нумерация с 0)
+                           var qa = image.select('BQA');
+                           var isCloud = qa.bitwiseAnd(cloudBitMask).eq(0);
+                           return image.updateMask(isCloud);
+                         });
+  
+  if (images.size().getInfo() > 0) {
+    var integralImage = images.reduce(ee.Reducer.mean());
+    return integralImage.select('NDVI_mean').rename(name);
+  }
+  
+  return null;
+};
+
+// Создание интегральных снимков для указанных периодов
+var integral1991_1996 = createIntegralImage(dataset, '1991-01-01', '1996-12-31', 'Integral NDVI 1991-1996');
+var integral1996_1999 = createIntegralImage(dataset, '1996-01-01', '1999-12-31', 'Integral NDVI 1996-1999');
+
+// Визуализация интегральных снимков
+var visParams = {
+  min: -1, // Подставьте сюда подходящее значение
+  max: 1, // Подставьте сюда подходящее значение
+  palette: ['green', 'yellow', 'red']
+};
+
+if (integral1991_1996) {
+  Map.addLayer(integral1991_1996, visParams, 'Integral NDVI 1991-1996');
+}
+
+if (integral1996_1999) {
+  Map.addLayer(integral1996_1999, visParams, 'Integral NDVI 1996-1999');
+}
+
+// Настройка карты
+Map.setCenter(85, 50, 6);
+// ... (ваш предыдущий код)
+
+// Экспорт интегральных снимков на Google Drive
+if (integral1991_1996) {
+  Export.image.toDrive({
+    image: integral1991_1996,
+    maxPixels: 487276534,
+    description: 'Integral_NDVI_1991_1996',
+    scale: 30, // Разрешение снимка
+    region: altaiRegion // Область интереса
+  });
+}
+
+if (integral1996_1999) {
+  Export.image.toDrive({
+    image: integral1996_1999,
+    maxPixels: 487276534,
+    description: 'Integral_NDVI_1996_1999',
+    scale: 30, // Разрешение снимка
+    region: altaiRegion // Область интереса
+  });
+}

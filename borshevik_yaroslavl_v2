@@ -1,0 +1,58 @@
+// Загрузка коллекции региона Смоленск
+var smolensk = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_CODE', 2576));
+var smolenskRegion = smolensk.geometry();
+
+// Пороговые значения
+var Cutoff_for_vegetation = 0.45;
+var Cutoff_for_Heracleum = 25;
+var Cloud_Percentage_Threshold = 20;  // Порог облачности в процентах
+
+// Функция для вычисления HSI
+var computeHSI = function(image) {
+  var hsi = image.expression(
+    '(NIR / (GREEN - BLUE))', {
+      'NIR': image.select('B8'),
+      'GREEN': image.select('B3'),
+      'BLUE': image.select('B2')
+    }
+  );
+  return hsi.clip(smolenskRegion);
+};
+
+// Функция для вычисления NDVI
+var computeNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']);
+  return ndvi.clip(smolenskRegion);
+};
+
+// Загрузка и обработка изображений с августа по сентябрь
+var images_Summer = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+  .filterDate('2023-08-15', '2023-08-30')
+  .filterBounds(smolenskRegion);
+
+// Вычисление среднего RGB
+var avgRGB = images_Summer.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', Cloud_Percentage_Threshold)).median().clip(smolenskRegion);
+
+// Вычисление средней маски
+var avgHSI_Summer = images_Summer.map(computeHSI).mean();
+var avgNDVI_Summer = images_Summer.map(computeNDVI).mean();
+var combinedDifference = avgHSI_Summer.subtract(avgNDVI_Summer)
+  .updateMask(avgHSI_Summer.gt(Cutoff_for_Heracleum))
+  .updateMask(avgNDVI_Summer.gt(Cutoff_for_vegetation))
+  .clip(smolenskRegion);  // Обрезка маски борщевика по границам
+
+// Отображение результатов на карте
+Map.addLayer(combinedDifference, {min: -10, max: 10, palette: ['blue', 'white', 'green']}, 'Combined Difference for Summer');
+Map.addLayer(avgRGB, {bands: ['B4', 'B3', 'B2'], max: 3000}, 'Average RGB for Summer');
+
+// Экспорт маски борщевика в Google Drive
+Export.image.toDrive({
+  image: combinedDifference,
+  description: 'Borshevik_Mask_Summer_2023',
+  scale: 10,  // Разрешение в метрах на пиксель (можете изменить по своему усмотрению)
+  region: smolenskRegion,
+  maxPixels: 1e13,
+  folder: 'Your_Google_Drive_Folder_Name'  // Название папки на Google Drive (если не указать, сохранится в корневой директории)
+});
+

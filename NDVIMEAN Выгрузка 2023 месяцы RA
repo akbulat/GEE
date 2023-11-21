@@ -1,0 +1,48 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var no = ee.Image("projects/ee-akfazlief/assets/integral_crops"),
+    crops = ee.FeatureCollection("projects/ee-akfazlief/assets/crops_RA"),
+    geometry = /* color: #00ff00 */ee.Geometry.MultiPoint();
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var cropsShape = ee.FeatureCollection("projects/ee-akfazlief/assets/crops_RA");
+
+var collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+  .filterBounds(cropsShape)
+  .filterDate('2023-05-01', '2023-08-31')
+  .select(['B8', 'B4']);
+
+// Функция для расчета NDVI
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+var ndviCollection = collection.map(addNDVI);
+
+// Создаем список месяцев
+var months = ee.List.sequence(5, 8);
+
+var cropsWithNDVI = ee.FeatureCollection(months.map(function(month) {
+  var startDate = ee.Date.fromYMD(2023, month, 1);
+  var endDate = startDate.advance(1, 'month').advance(-1, 'day');
+  
+  var monthImages = ndviCollection.filterDate(startDate, endDate);
+  
+  var meanNDVI = monthImages.mean().reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: cropsShape.geometry(),
+    scale: 10,
+    maxPixels: 1e13
+  });
+  
+  return cropsShape.set('MeanNDVI_' + month, meanNDVI.get('NDVI'));
+}));
+
+// Вывести результат в консоль
+print(cropsWithNDVI);
+
+// Если хотите экспортировать результат в CSV
+Export.table.toDrive({
+  collection: cropsWithNDVI,
+  description: 'Crops_MeanNDVI_ByMonth',
+  fileFormat: 'CSV'
+});

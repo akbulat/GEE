@@ -1,0 +1,91 @@
+var irkutsk = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_CODE', 2506));
+var irkutskRegion = irkutsk.geometry();
+
+// Загрузка необходимых библиотек и установка параметров
+var dem = ee.Image('USGS/SRTMGL1_003'); // Загрузка цифровой модели высоты
+
+// Ограничение области анализа границами Иркутской области
+dem = dem.clip(irkutskRegion);
+
+// Вычисление уклона на основе DEM
+var slope = ee.Terrain.slope(dem);
+
+// Вычисление аккумуляции воды для определения речной сети
+var flowAccumulation = ee.Image('WWF/HydroSHEDS/15ACC').clip(irkutskRegion);
+
+// Применение порога для идентификации речной сети
+var threshold = 100; // Этот порог можно настроить
+var rivers = flowAccumulation.gt(threshold);
+
+// Визуализация
+Map.centerObject(irkutskRegion, 6);
+Map.addLayer(dem, {min: 0, max: 4000, palette: ['00FFFF', '0000FF']}, 'DEM');
+Map.addLayer(slope, {min: 0, max: 60, palette: ['white', 'black']}, 'Slope');
+Map.addLayer(flowAccumulation, {min: 0, max: 10000, palette: ['0000FF', '00FF00', 'FFFF00']}, 'Flow Accumulation');
+Map.addLayer(rivers, {palette: 'blue'}, 'Rivers');
+// Добавление границ Иркутской области на карту
+var irkutskBorderVis = {
+  color: 'red',
+  fillColor: '00000000' // прозрачный заливка
+};
+
+// Добавление границ Иркутской области на карту
+Map.addLayer(irkutsk, irkutskBorderVis, 'Иркутск Region Borders');
+
+// Экспорт DEM в Google Drive
+Export.image.toDrive({
+  image: dem,
+  description: 'DEM_Irkutsk',
+  scale: 30,
+  region: irkutskRegion,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 5e9 
+});
+// Экспорт уклона в Google Drive
+Export.image.toDrive({
+  image: slope,
+  description: 'Slope_Irkutsk',
+  scale: 30,
+  region: irkutskRegion,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 5e9 
+});
+// Экспорт аккумуляции стока в Google Drive
+Export.image.toDrive({
+  image: flowAccumulation,
+  description: 'FlowAccumulation_Irkutsk',
+  scale: 30,
+  region: irkutskRegion,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 5e9 
+});
+// Экспорт карты рек в Google Drive
+Export.image.toDrive({
+  image: rivers,
+  description: 'Rivers_Irkutsk',
+  scale: 30,
+  region: irkutskRegion,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 5e9 
+});
+
+// Загрузка данных направления стока HydroSHEDS
+var hydroshedFlowDirection = ee.Image('WWF/HydroSHEDS/03DIR');
+
+// Клипсуем данные под область интереса - Иркутская область
+var clippedFlowDirection = hydroshedFlowDirection.clip(irkutskRegion);
+
+// Визуализация направления стока
+Map.centerObject(irkutskRegion, 6);
+Map.addLayer(clippedFlowDirection, {}, 'Flow Direction');
+
+// Экспорт направления стока в Google Drive, если необходимо
+Export.image.toDrive({
+  image: clippedFlowDirection,
+  description: 'HydroSHEDS_FlowDirection_Irkutsk',
+  scale: 30,
+  region: irkutskRegion,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 5e9
+});

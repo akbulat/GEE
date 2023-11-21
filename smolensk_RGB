@@ -1,0 +1,59 @@
+// Загрузка коллекции региона Смоленск
+var smolensk = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_CODE', 2557));
+var smolenskRegion = smolensk.geometry();
+
+// Функция для маскировки облаков в изображениях Sentinel-2
+function maskS2clouds(image) {
+  var qa = image.select('QA60');
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0)
+      .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
+  return image.updateMask(mask).divide(10000);
+}
+
+// Функция для создания RGB и обрезки по границам региона
+var createRGB = function(image) {
+  var maskedImage = maskS2clouds(image);
+  var rgb = maskedImage.select(['B4', 'B3', 'B2']);
+  return rgb.clip(smolenskRegion);
+};
+
+// Список месяцев для обработки (с апреля по октябрь)
+var months = [4];
+
+// Фильтрация коллекции Sentinel-2 для каждого месяца
+months.forEach(function(month) {
+  var startDate = ee.Date.fromYMD(2023, month, 1).advance(-10, 'days');
+  var endDate = ee.Date.fromYMD(2023, month, 1).advance(1, 'month').advance(30, 'days');
+  
+var sentinelCollection = ee.ImageCollection('COPERNICUS/S2_SR')  // Изменение на коллекцию COPERNICUS/S2_SR
+    .filterBounds(smolenskRegion)
+    .filterDate(startDate, endDate)
+    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 15))
+    .map(createRGB);  // Удаление вызова функции maskS2clouds отсюда, так как он теперь внутри функции createRGB
+
+  var monthlyRGB = sentinelCollection.median();
+  
+  var monthName = ee.Date.fromYMD(2023, month, 1).format('MMMM');
+  print(monthName.getInfo() + ' RGB', monthlyRGB);
+
+  // Визуализация
+  Map.addLayer(monthlyRGB, {
+    min: 0,
+    max: 0.3,
+    gamma: 1
+  }, monthName.getInfo() + ' RGB');
+  
+  // Экспорт изображения в Google Drive
+  Export.image.toDrive({
+    image: monthlyRGB,
+    description: monthName.getInfo() + '_RGB',
+    folder: 'RGB',  // Имя папки в вашем Google Drive
+    scale: 10,
+    region: smolenskRegion,
+    maxPixels: 1e13  // Установка максимального количества пикселей для экспорта
+  });
+});
+

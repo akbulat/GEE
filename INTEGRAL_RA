@@ -1,0 +1,52 @@
+// Загрузка геометрии Республики Алтай
+var republicOfAltai = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_NAME', 'Altay Rep.')); // Выберите геометрию Республики Алтай
+var altaiRegion = republicOfAltai.geometry();
+var rasterPaths = [
+  "projects/ee-akfazlief/assets/cropland_1984_1990_ra",
+  "projects/ee-akfazlief/assets/cropland_1991_1995_ra",
+  "projects/ee-akfazlief/assets/cropland_1996_1999_ra",
+  "projects/ee-akfazlief/assets/cropland__2000_2003_ra",
+  "projects/ee-akfazlief/assets/cropland__2004_2007_ra",
+  "projects/ee-akfazlief/assets/cropland__2008_2011_ra",
+  "projects/ee-akfazlief/assets/cropland__2012_2015_ra",
+  "projects/ee-akfazlief/assets/cropland__2016_2019_ra",
+  "projects/ee-akfazlief/assets/cropland__2020_ra",
+  "projects/ee-akfazlief/assets/cropland__2021_ra",
+  "projects/ee-akfazlief/assets/cropland__2022_ra"
+];
+
+// Создаем коллекцию из растров
+var rasterCollection = ee.ImageCollection(rasterPaths.map(function(path) {
+  return ee.Image(path);
+}));
+
+// Объединяем растры с помощью максимума
+var integratedCropland = rasterCollection.max();
+
+// Маскируем значения 0
+var mask = integratedCropland.gt(0);
+var maskedIntegratedCropland = integratedCropland.updateMask(mask);
+
+// Вычисляем площадь
+var area = maskedIntegratedCropland.reduceRegion({
+  reducer: ee.Reducer.sum(),
+  geometry: altaiRegion,
+  scale: 30,
+  maxPixels: 1e13
+});
+
+var areaSquareMeters = area.get('b1');
+var areaHectares = ee.Number(areaSquareMeters).divide(10000);
+
+print('Площадь интегрального слоя в гектарах:', areaHectares);
+Map.addLayer(maskedIntegratedCropland, {min: 0, max: 1}, "Маскированный интегральный слой");
+
+// Экспортируем растр
+Export.image.toDrive({
+  image: maskedIntegratedCropland,
+  description: 'masked_integrated_cropland',
+  scale: 30,
+  region: altaiRegion,
+  maxPixels: 1e13
+});

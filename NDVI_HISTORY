@@ -1,0 +1,116 @@
+// Загрузка геометрии Алтайского края
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+var altaiRegion = altai.geometry();
+
+// Загрузка коллекции Landsat 5 Collection 1 Tier 1 TOA Reflectance
+var landsat5Collection = ee.ImageCollection('LANDSAT/LT05/C01/T1_TOA')
+  .filterBounds(altaiRegion)
+  .filter(ee.Filter.calendarRange(5, 9, 'month'))
+  .filterMetadata('CLOUD_COVER', 'less_than', 20)
+  .select(['B3', 'B4']);
+
+// Загрузка коллекции Landsat 7 Collection 2 Tier 1 TOA Reflectance
+var landsat7Collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_TOA')
+  .filterBounds(altaiRegion)
+  .filter(ee.Filter.calendarRange(5, 9, 'month'))
+  .filterMetadata('CLOUD_COVER', 'less_than', 20)
+  .select(['B3', 'B4']);
+
+// Загрузка коллекции Landsat 8 Collection 2 Tier 1 TOA Reflectance
+var landsat8Collection = ee.ImageCollection('LANDSAT/LC08/C02/T1_TOA')
+  .filterBounds(altaiRegion)
+  .filter(ee.Filter.calendarRange(5, 9, 'month'))
+  .filterMetadata('CLOUD_COVER', 'less_than', 20)
+  .select(['B4', 'B5']);
+
+// Исправленная функция для расчета NDVI для Landsat 5 и 7
+var addNDVI_Landsat57 = function(image) {
+  var ndvi = image.normalizedDifference(['B4', 'B3']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+// Исправленная функция для расчета NDVI для Landsat 8
+var addNDVI_Landsat8 = function(image) {
+  var ndvi = image.normalizedDifference(['B5', 'B4']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+// Применение функции к коллекциям
+var ndviCollection_Landsat5 = landsat5Collection.map(addNDVI_Landsat57);
+var ndviCollection_Landsat7 = landsat7Collection.map(addNDVI_Landsat57);
+var ndviCollection_Landsat8 = landsat8Collection.map(addNDVI_Landsat8);
+
+// Объединение коллекций Landsat 5, Landsat 7 и Landsat 8
+var ndviCollection = ndviCollection_Landsat5
+  .merge(ndviCollection_Landsat7)
+  .merge(ndviCollection_Landsat8);
+
+// Отображение границы Алтайского края
+
+
+
+// Функция для отображения выбранного года
+
+// Функция для отображения выбранного года
+function displayNDVI(yearRange) {
+  var layerName = 'NDVI ' + yearRange;
+  
+  // Удаляем старый слой, если он существует
+  var existingLayer = ndviLayers[layerName];
+  if (existingLayer) {
+    Map.layers().remove(existingLayer);
+  }
+  
+  var startYear = parseInt(yearRange.split('-')[0]);
+  var endYear = parseInt(yearRange.split('-')[1]);
+  
+  var startDate = ee.Date.fromYMD(startYear, 5, 1);
+  var endDate = ee.Date.fromYMD(endYear, 9, 30);
+  
+  var yearImages = ndviCollection.filterDate(startDate, endDate);
+  
+  if (yearImages.size().getInfo() > 0) {
+    var meanNdviImage = yearImages.select('NDVI').mean();
+    var meanNdviImageClipped = meanNdviImage.clip(altaiRegion);
+    
+    // Отображение NDVI с фиксированными значениями min и max
+    var ndviLayer = ui.Map.Layer(meanNdviImageClipped, { min: -1, max: 1, palette: ['blue', 'white', 'green'] }, layerName);
+    Map.layers().add(ndviLayer);
+    
+    ndviLayers[layerName] = ndviLayer;
+  } else {
+    print('No images available for ' + yearRange);
+  }
+}
+
+
+
+
+// Создаем список годов
+var years = ['1984-1990', '1991-1995', '1996-2000', '2001-2005', '2006-2010', '2011-2016', '2017-2020', '2020', '2021', '2022', '2023'];
+
+// Создаем объект слоев NDVI для хранения отображенных слоев
+var ndviLayers = {};
+
+// Создаем список выбора года
+var yearSelect = ui.Select({
+  items: years,
+  onChange: function(selectedYearRange) {
+    if (selectedYearRange != 'Choose a year') {
+      displayNDVI(selectedYearRange);
+    }
+  },
+  style: {width: '200px'}
+});
+
+// Создаем панель для выбора года
+var yearPanel = ui.Panel({
+  widgets: [
+    ui.Label('Выберите год для отображения NDVI:'),
+    yearSelect
+  ],
+  style: {position: 'top-right'}
+});
+
+// Добавляем панель к карте
+Map.add(yearPanel);

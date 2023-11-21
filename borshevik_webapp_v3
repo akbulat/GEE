@@ -1,0 +1,144 @@
+// Загрузка коллекции границ России
+var regions = ee.FeatureCollection("projects/ee-akfazlief/assets/russia_bounds");
+
+// Получение уникальных имен областей
+var uniqueRegions = ee.List(regions.aggregate_array('addr_regio')).distinct().getInfo();
+
+var selectedRegionGeometry;  // Будет обновлено при выборе района
+
+// Функция для вычисления HSI
+var computeHSI = function(image) {
+  var hsi = image.expression(
+    '(NIR / (GREEN - BLUE))', {
+      'NIR': image.select('B8'),
+      'GREEN': image.select('B3'),
+      'BLUE': image.select('B2')
+    }
+  );
+  return hsi.clip(selectedRegionGeometry);
+};
+
+// Функция для вычисления NDVI
+var computeNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']);
+  return ndvi.clip(selectedRegionGeometry);
+};
+
+var controlPanel = ui.Panel({
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {
+    width: '400px',
+    position: 'top-left',
+    padding: '10px'
+  }
+});
+Map.add(controlPanel);
+
+// Выпадающий список для выбора области
+var regionSelect = ui.Select({
+    items: uniqueRegions,
+    placeholder: 'Выберите область',
+    onChange: function(selectedRegion) {
+        var districtsInRegion = ee.List(regions.filter(ee.Filter.eq('addr_regio', selectedRegion))
+                                      .aggregate_array('name')).getInfo();
+        districtSelect.items().reset(districtsInRegion);
+        if (districtsInRegion.length > 0) {
+            districtSelect.setValue(districtsInRegion[0], false);
+        } else {
+            districtSelect.setValue(null, false);
+        }
+    }
+});
+
+controlPanel.add(regionSelect);
+
+// Выпадающий список для выбора района
+var districtSelect = ui.Select({
+    items: [],
+    placeholder: 'Выберите район',
+    onChange: function(selectedDistrict) {
+        var district = regions.filter(ee.Filter.and(
+                          ee.Filter.eq('name', selectedDistrict),
+                          ee.Filter.eq('addr_regio', regionSelect.getValue())
+                        )).first();
+        selectedRegionGeometry = district.geometry();
+        // Центрирование карты на выбранном районе
+        Map.centerObject(selectedRegionGeometry, 7);
+    }
+});
+
+controlPanel.add(districtSelect);
+
+// Добавим выбор даты
+var dateSelector = ui.DateSlider({
+  period: 1,
+  start: '2022-08-01',
+  end: '2023-09-17',
+  style: {
+    stretch: 'horizontal'
+  }
+});
+controlPanel.add(dateSelector);
+
+// Поля для задания пороговых значений
+var vegetationThresholdInput = ui.Textbox({
+  placeholder: 'Порог для NDVI (напр. 0.6)',
+  value: '0.6',
+  style: {
+    stretch: 'horizontal'
+  }
+});
+controlPanel.add(vegetationThresholdInput);
+
+var heracleumThresholdInput = ui.Textbox({
+  placeholder: 'Порог для HSI (напр. 20)',
+  value: '20',
+  style: {
+    stretch: 'horizontal'
+  }
+});
+controlPanel.add(heracleumThresholdInput);
+
+var cloudThresholdInput = ui.Textbox({
+  placeholder: 'Порог облачности (%) (напр. 10)',
+  value: '10',
+  style: {
+    stretch: 'horizontal'
+  }
+});
+controlPanel.add(cloudThresholdInput);
+
+// Кнопка для генерации слоев
+var generateButton = ui.Button({
+    label: 'Сгенерировать слои',
+    onClick: function() {
+        // Удаление всех слоев с карты
+        Map.layers().reset();
+
+        var selectedDates = dateSelector.getValue();
+        var selectedDate = selectedDates[0];
+        var startDate = ee.Date(selectedDate).advance(-1, 'month');
+        var endDate = ee.Date(selectedDate);
+
+        // Получение пороговых значений из полей ввода
+        var Cutoff_for_vegetation = parseFloat(vegetationThresholdInput.getValue());
+        var Cutoff_for_Heracleum = parseFloat(heracleumThresholdInput.getValue());
+        var Cloud_Percentage_Threshold = parseFloat(cloudThresholdInput.getValue());
+
+        // Загрузка и обработка изображений
+        var images = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+            .filterDate(startDate, endDate)
+            .filterBounds(selectedRegionGeometry);
+
+        var avgHSI = images.map(computeHSI).median();
+        var avgNDVI = images.map(computeNDVI).median();
+        var difference = avgHSI.subtract(avgNDVI)
+            .updateMask(avgHSI.gt(Cutoff_for_Heracleum))
+            .updateMask(avgNDVI.gt(Cutoff_for_vegetation));
+
+        // Отображение результатов на карте
+        Map.addLayer(difference, {min: -10, max: 10, palette: ['blue', 'white', 'green']}, 'Hogweed Mask');
+        Map.addLayer(images.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', Cloud_Percentage_Threshold)).median().clip(selectedRegionGeometry), {bands: ['B4', 'B3', 'B2'], max: 3000}, 'RGB');
+    }
+});
+controlPanel.add(generateButton);

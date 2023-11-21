@@ -1,0 +1,195 @@
+// Загрузка коллекции границ России
+var regions = ee.FeatureCollection("projects/ee-akfazlief/assets/russia_bounds");
+var uniqueRegions = ee.List(regions.aggregate_array('addr_regio')).distinct().getInfo();
+var selectedRegionGeometry;
+
+var panel = ui.Panel({
+    layout: ui.Panel.Layout.flow('vertical'),
+    style: {
+        width: '400px',
+        position: 'top-left',
+        padding: '10px'
+    }
+});
+Map.add(panel);
+
+var titleLabel = ui.Label('Отображение данных газа Sentinel-5P для России', {
+    fontWeight: 'bold',
+    fontSize: '20px',
+    margin: '10px 0'
+});
+panel.add(titleLabel);
+
+panel.add(ui.Label('Выберите регион:', {fontWeight: 'bold'}));
+var regionSelect = ui.Select({
+    items: uniqueRegions,
+    placeholder: 'Выберите регион',
+    onChange: function(selectedRegion) {
+        var districtsInRegion = ee.List(regions.filter(ee.Filter.eq('addr_regio', selectedRegion))
+                                      .aggregate_array('name')).getInfo();
+        districtSelect.items().reset(districtsInRegion);
+        if (districtsInRegion.length > 0) {
+            districtSelect.setValue(districtsInRegion[0], false);
+        } else {
+            districtSelect.setValue(null, false);
+        }
+    }
+});
+panel.add(regionSelect);
+
+panel.add(ui.Label('Выберите район:'));
+var districtSelect = ui.Select({
+    items: [],
+    placeholder: 'Выберите район',
+    onChange: function(selectedDistrict) {
+        var district = regions.filter(ee.Filter.and(
+                          ee.Filter.eq('name', selectedDistrict),
+                          ee.Filter.eq('addr_regio', regionSelect.getValue())
+                        )).first();
+        selectedRegionGeometry = district.geometry();
+        Map.centerObject(selectedRegionGeometry, 7);
+    }
+});
+panel.add(districtSelect);
+
+panel.add(ui.Label('Выберите дату:'));
+var dateSelector = ui.DateSlider({
+    period: 1,
+    start: '2022-08-01',
+    end: '2023-09-17',
+    style: {
+        stretch: 'horizontal'
+    }
+});
+panel.add(dateSelector);
+
+var gases = ['NO2', 'O3', 'SO2', 'CO', 'HCHO', 'CH4'];
+var gasSelect = ui.Select({
+    items: gases,
+    placeholder: 'Выберите газ',
+    style: {
+        stretch: 'horizontal'
+    }
+});
+panel.add(gasSelect);
+
+var currentLayer = null;
+var currentLegend = null;
+
+function updateLegend(minValue, maxValue) {
+    if (currentLegend) {
+        Map.remove(currentLegend);
+    }
+    
+    currentLegend = ui.Panel({
+        style: {
+            position: 'bottom-right',
+            padding: '8px 15px'
+        }
+    });
+    
+    var legendTitle = ui.Label({
+        value: 'Значения, молекулы/см²',
+        style: {
+            fontWeight: 'bold',
+            fontSize: '18px',
+            margin: '0 0 4px 0',
+            padding: '0'
+        }
+    });
+
+    var minLabel = ui.Label('Min: ' + minValue.toFixed(10));
+    var maxLabel = ui.Label('Max: ' + maxValue.toFixed(10));
+
+    currentLegend.add(legendTitle);
+    currentLegend.add(minLabel);
+    currentLegend.add(maxLabel);
+    Map.add(currentLegend);
+}
+
+function displayGasData(gas, date) {
+    if (currentLayer) {
+        Map.remove(currentLayer);
+    }
+
+    var dataset;
+    var visualization = {};
+    var startDate = ee.Date(date).advance(-30, 'day');
+    var endDate = ee.Date(date);
+
+    switch(gas) {
+        case 'NO2':
+            dataset = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_NO2')
+                        .select('NO2_column_number_density')
+                        .filterDate(startDate, endDate);
+            visualization.palette = ['black', 'blue', 'purple', 'cyan', 'green', 'yellow', 'red'];
+            break;
+        case 'O3':
+            dataset = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_O3')
+                        .select('O3_column_number_density')
+                        .filterDate(startDate, endDate);
+            visualization.palette = ['black', 'blue', 'green', 'yellow', 'red'];
+            break;
+        case 'SO2':
+            dataset = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_SO2')
+                        .select('SO2_column_number_density')
+                        .filterDate(startDate, endDate);
+            visualization.palette = ['black', 'blue', 'green', 'yellow', 'red'];
+            break;
+        case 'CO':
+            dataset = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_CO')
+                        .select('CO_column_number_density')
+                        .filterDate(startDate, endDate);
+            visualization.palette = ['black', 'blue', 'purple', 'cyan', 'green', 'yellow', 'red'];
+            break;
+        case 'HCHO':
+            dataset = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_HCHO')
+                        .select('tropospheric_HCHO_column_number_density')
+                        .filterDate(startDate, endDate);
+            visualization.palette = ['black', 'blue', 'green', 'yellow', 'red'];
+            break;
+        case 'CH4':
+            dataset = ee.ImageCollection('COPERNICUS/S5P/OFFL/L3_CH4')
+                        .select('CH4_column_volume_mixing_ratio_dry_air')
+                        .filterDate(startDate, endDate);
+            visualization.palette = ['black', 'blue', 'green', 'yellow', 'red'];
+            break;
+        default:
+            print('Неизвестный газ: ' + gas);
+            return;
+    }
+
+    var clippedDataset = dataset.mean().clip(selectedRegionGeometry);
+
+    var minVal = clippedDataset.reduceRegion({
+        reducer: ee.Reducer.min(),
+        geometry: selectedRegionGeometry,
+        scale: 1000,
+        maxPixels: 1e9
+    }).getInfo();
+
+    var maxVal = clippedDataset.reduceRegion({
+        reducer: ee.Reducer.max(),
+        geometry: selectedRegionGeometry,
+        scale: 1000,
+        maxPixels: 1e9
+    }).getInfo();
+
+    visualization.min = minVal[Object.keys(minVal)[0]];
+    visualization.max = maxVal[Object.keys(maxVal)[0]];
+
+    updateLegend(visualization.min, visualization.max);
+
+    currentLayer = Map.addLayer(dataset.mean().clip(selectedRegionGeometry), visualization, gas);
+}
+
+var generateButton = ui.Button({
+    label: 'Отобразить данные газа',
+    onClick: function() {
+        var selectedGas = gasSelect.getValue();
+        var selectedDates = dateSelector.getValue();
+        var selectedDate = selectedDates[0];
+        displayGasData(selectedGas, selectedDate);
+    }
+});
+panel.add(generateButton);

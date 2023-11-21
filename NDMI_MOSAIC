@@ -1,0 +1,54 @@
+// Загрузка геометрии Алтайского края
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+var altaiRegion = altai.geometry();
+
+// Загрузка коллекции Landsat 8 Collection 2 Tier 1 TOA Reflectance
+var collection = ee.ImageCollection('LANDSAT/LC08/C02/T1_TOA')
+  .filterBounds(altaiRegion)
+  .filterDate('2020-05-01', '2023-08-30')
+  .select(['B5', 'B6']); // Выберите полосы для расчета NDMI
+
+// Функция для расчета NDMI
+var addNDMI = function(image) {
+  var ndmi = image.normalizedDifference(['B5', 'B6']).rename('NDMI');
+  return image.addBands(ndmi);
+};
+
+// Применение функции к коллекции
+var ndmiCollection = collection.map(addNDMI);
+
+// Применение маски границ шейп-файла к NDMI коллекции
+var clippedNdmiCollection = ndmiCollection.map(function(image) {
+  return image.clip(altaiRegion);
+});
+
+// Определение палитры для раскраски NDMI
+var ndmiPalette = ['00FF00', '00FFFF']; // От светло-голубого к синему
+
+// Создание интегральных снимков среднего NDMI для каждого года
+var years = ee.List(['2020', '2021', '2022', '2023']);
+years.getInfo().forEach(function(year) {
+  var startDate = ee.Date.fromYMD(parseInt(year), 5, 1);
+  var endDate = ee.Date.fromYMD(parseInt(year), 8, 30);
+  var yearImages = clippedNdmiCollection.filterDate(startDate, endDate);
+
+  if (yearImages.size().getInfo() > 0) {
+    var meanNdmiImage = yearImages.select('NDMI').mean();
+    Map.addLayer(meanNdmiImage, {min: -1, max: 1, palette: ndmiPalette}, 'Mean NDMI ' + year);
+    
+    // Экспорт интегрального снимка среднего NDMI в Google Drive
+    Export.image.toDrive({
+      image: meanNdmiImage,
+      description: 'Mean_NDMI_' + year,
+      folder: 'Your_Folder_Name', // Замените на имя вашей папки в Google Drive
+      fileNamePrefix: 'Mean_NDMI_' + year,
+      scale: 30, // Разрешение в метрах
+      region: altaiRegion,
+      maxPixels: 487295534 
+    });
+  }
+});
+
+// Отображение границы Алтайского края
+Map.centerObject(altaiRegion, 8);
+Map.addLayer(altaiRegion);

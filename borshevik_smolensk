@@ -1,0 +1,45 @@
+// Загрузка коллекции региона Смоленск
+var smolensk = ee.FeatureCollection("FAO/GAUL/2015/level1")
+  .filter(ee.Filter.eq('ADM1_CODE', 2557));
+var smolenskRegion = smolensk.geometry();
+
+// Пороговые значения
+var Cutoff_for_vegetation = 0.5;
+var Cutoff_for_Heracleum = 10;
+
+// Функция для вычисления HSI
+var computeHSI = function(image) {
+  var hsi = image.expression(
+    '(NIR / (GREEN - BLUE))', {
+      'NIR': image.select('B5'),
+      'GREEN': image.select('B3'),
+      'BLUE': image.select('B2')
+    }
+  );
+  return hsi.clip(smolenskRegion);
+};
+
+// Функция для вычисления NDVI
+var computeNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['B5', 'B4']);
+  return ndvi.clip(smolenskRegion);
+};
+
+// Загрузка коллекции изображений
+var images = ee.ImageCollection("LANDSAT/LC09/C02/T1_TOA")
+  .filterDate('2023-05-15', '2023-06-15')
+  .filterBounds(smolenskRegion);
+
+// Вычисление среднего NDVI и HSI за период
+var avgNDVI = images.map(computeNDVI).mean();
+var avgHSI = images.map(computeHSI).mean();
+
+// Применение пороговых значений
+var vegetationMask = avgNDVI.gt(Cutoff_for_vegetation);
+var heracleumMask = avgHSI.gt(Cutoff_for_Heracleum);
+
+// Вычисление разницы между HSI и NDVI
+var difference = avgHSI.subtract(avgNDVI).updateMask(vegetationMask).updateMask(heracleumMask);
+
+// Отображение результатов
+Map.addLayer(difference, {min: -10, max: 10, palette: ['blue', 'white', 'green']}, 'Potential Heracleum locations');

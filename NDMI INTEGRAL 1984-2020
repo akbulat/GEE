@@ -1,0 +1,88 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var table = ee.FeatureCollection("projects/ee-akfazlief/assets/NDWI_ALTAYSKIY_KRAY");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Загрузка геометрии Алтайского края
+var altai = ee.FeatureCollection("projects/ee-akfazlief/assets/altayski_cry");
+var altaiRegion = altai.geometry();
+
+// Загрузка коллекции Landsat 5 Collection 1 Tier 1 TOA Reflectance
+var landsat5Collection = ee.ImageCollection('LANDSAT/LT05/C01/T1_TOA')
+  .filterBounds(altaiRegion)
+  .filterDate('1984-01-01', '2012-12-31')
+  .filter(ee.Filter.calendarRange(5, 9, 'month')) // Фильтрация по месяцам май-сентябрь
+  .select(['B4', 'B5']); // Выберите полосы для расчета NDMI
+
+// Загрузка коллекции Landsat 7 Collection 2 Tier 1 TOA Reflectance
+var landsat7Collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_TOA')
+  .filterBounds(altaiRegion)
+  .filterDate('2001-01-01', '2005-12-31')
+  .filter(ee.Filter.calendarRange(5, 9, 'month')) // Фильтрация по месяцам май-сентябрь
+  .select(['B4', 'B5']); // Выберите полосы для расчета NDMI
+
+// Загрузка коллекции Landsat 8 Collection 2 Tier 1 TOA Reflectance
+var landsat8Collection = ee.ImageCollection('LANDSAT/LC08/C02/T1_TOA')
+  .filterBounds(altaiRegion)
+  .filterDate('2013-01-01', '2020-12-31')
+  .filter(ee.Filter.calendarRange(5, 9, 'month')) // Фильтрация по месяцам май-сентябрь
+  .select(['B5', 'B6']); // Выберите полосы для расчета NDMI
+
+// Функция для расчета NDMI для Landsat 5
+var addNDMI_Landsat5 = function(image) {
+  var ndmi = image.normalizedDifference(['B4', 'B5']).rename('NDMI');
+  return image.addBands(ndmi);
+};
+
+// Функция для расчета NDMI для Landsat 7
+var addNDMI_Landsat7 = function(image) {
+  var ndmi = image.normalizedDifference(['B4', 'B5']).rename('NDMI');
+  return image.addBands(ndmi);
+};
+
+// Функция для расчета NDMI для Landsat 8
+var addNDMI_Landsat8 = function(image) {
+  var ndmi = image.normalizedDifference(['B5', 'B6']).rename('NDMI');
+  return image.addBands(ndmi);
+};
+
+// Применение функции к коллекциям
+var ndmiCollection_Landsat5 = landsat5Collection.map(addNDMI_Landsat5);
+var ndmiCollection_Landsat7 = landsat7Collection.map(addNDMI_Landsat7);
+var ndmiCollection_Landsat8 = landsat8Collection.map(addNDMI_Landsat8);
+
+// Объединение коллекций Landsat 5, Landsat 7 и Landsat 8
+var ndmiCollection = ndmiCollection_Landsat5
+  .merge(ndmiCollection_Landsat7)
+  .merge(ndmiCollection_Landsat8);
+
+// Создание интегральных снимков среднего NDMI для каждого периода
+var years = ['1984-1990', '1991-1995', '1996-2000', '2001-2005', '2006-2010', '2011-2016', '2017-2020'];
+
+years.forEach(function(yearRange) {
+  var startDate = ee.Date.fromYMD(parseInt(yearRange.split('-')[0]), 5, 1);
+  var endDate = ee.Date.fromYMD(parseInt(yearRange.split('-')[1]), 9, 30);
+  var yearImages = ndmiCollection.filterDate(startDate, endDate);
+
+  if (yearImages.size().getInfo() > 0) {
+    var meanNdmiImage = yearImages.select('NDMI').mean();
+    
+    // Обрезаем изображение по границам Алтайского края
+    var meanNdmiImageClipped = meanNdmiImage.clip(altaiRegion);
+    
+    Map.addLayer(meanNdmiImageClipped, {min: -1, max: 1, palette: ['00FF00', '00FFFF']}, 'Mean NDMI ' + yearRange);
+    
+    // Экспорт интегрального снимка среднего NDMI в Google Drive
+    Export.image.toDrive({
+      image: meanNdmiImageClipped,
+      description: 'Mean_NDMI_' + yearRange,
+      folder: 'Your_Folder_Name', // Замените на имя вашей папки в Google Drive
+      fileNamePrefix: 'Mean_NDMI_' + yearRange,
+      scale: 30, // Разрешение в метрах
+      region: altaiRegion,
+      maxPixels: 1e10 // Уменьшенное максимальное количество пикселей
+    });
+  }
+});
+
+// Отображение границы Алтайского края
+Map.centerObject(altaiRegion, 8);
+Map.addLayer(altaiRegion);
